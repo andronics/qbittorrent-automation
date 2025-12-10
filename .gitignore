@@ -10,6 +10,7 @@ build/
 
 # Virtual environments
 venv/
+.venv/
 env/
 ENV/
 
@@ -36,6 +37,9 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
 
 # User-specific config
 config/config.yml

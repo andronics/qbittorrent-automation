@@ -27,13 +27,34 @@ qBittorrent Automation is a Python-based rules engine that automates torrent man
 
 ### Installation
 
+**Option 1: Install from PyPI (recommended)**
+
+```bash
+# Install the package
+pip install qbittorrent-automation
+
+# Create config directory
+mkdir -p ~/.config/qbittorrent-automation
+
+# Download example configs
+curl -o ~/.config/qbittorrent-automation/config.yml \
+  https://raw.githubusercontent.com/andronics/qbittorrent-automation/main/config/config.example.yml
+curl -o ~/.config/qbittorrent-automation/rules.yml \
+  https://raw.githubusercontent.com/andronics/qbittorrent-automation/main/config/rules.example.yml
+
+# Edit config with your qBittorrent credentials
+nano ~/.config/qbittorrent-automation/config.yml
+```
+
+**Option 2: Install from source**
+
 ```bash
 # Clone the repository
 git clone https://github.com/andronics/qbittorrent-automation.git
 cd qbittorrent-automation
 
-# Install dependencies
-pip install requests pyyaml
+# Install in editable mode with development dependencies
+pip install -e ".[dev]"
 
 # Copy example configs
 cp config/config.example.yml config/config.yml
@@ -69,15 +90,29 @@ rules:
 
 ### Run It
 
+**Using console scripts (after pip install):**
+
 ```bash
 # Test with dry-run (shows what would happen)
-python triggers/manual.py --dry-run
+qbt-manual --dry-run
 
 # Apply rules
-python triggers/manual.py
+qbt-manual
 
 # Enable trace logging for debugging
-python triggers/manual.py --trace
+qbt-manual --trace
+```
+
+**Using Python module:**
+
+```bash
+python -m qbittorrent_automation.cli.manual --dry-run
+```
+
+**Legacy method (still works):**
+
+```bash
+python triggers/manual.py --dry-run
 ```
 
 ---
@@ -250,6 +285,18 @@ Execute one or more actions when conditions match:
 
 ### Scheduled Execution with Cron
 
+**Using console script (after pip install):**
+
+```bash
+# Run every hour
+0 * * * * qbt-scheduled
+
+# Run daily at 3 AM
+0 3 * * * qbt-scheduled
+```
+
+**Using legacy method:**
+
 ```bash
 # Run every hour
 0 * * * * cd /path/to/qbittorrent-automation && python triggers/scheduled.py
@@ -269,9 +316,9 @@ After=network.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/opt/qbittorrent-automation
-ExecStart=/usr/bin/python3 triggers/scheduled.py
+ExecStart=/usr/local/bin/qbt-scheduled
 User=qbittorrent
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 ```
 
 Create `/etc/systemd/system/qbittorrent-automation.timer`:
@@ -300,13 +347,15 @@ sudo systemctl start qbittorrent-automation.timer
 FROM python:3.11-slim
 
 WORKDIR /app
-RUN pip install requests pyyaml
 
-COPY lib/ /app/lib/
-COPY triggers/ /app/triggers/
+# Install the package
+RUN pip install qbittorrent-automation
+
+# Copy configuration files
 COPY config/ /app/config/
 
-CMD ["sh", "-c", "while true; do python triggers/scheduled.py; sleep 3600; done"]
+# Run scheduled trigger every hour
+CMD ["sh", "-c", "while true; do qbt-scheduled; sleep 3600; done"]
 ```
 
 **[📖 Deployment Guide](https://github.com/andronics/qbittorrent-automation/wiki/Deployment)**

@@ -6,8 +6,8 @@ Complete implementation of qBittorrent Web API v2 (>= v5.0)
 import requests
 from typing import List, Dict, Any, Optional
 
-from lib.errors import AuthenticationError, ConnectionError, APIError
-from lib.logging import get_logger
+from qbittorrent_automation.errors import AuthenticationError, ConnectionError, APIError
+from qbittorrent_automation.logging import get_logger
 
 logger = get_logger(__name__)
 

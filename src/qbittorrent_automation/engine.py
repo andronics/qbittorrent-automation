@@ -7,10 +7,10 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Tuple
 
-from lib.api import QBittorrentAPI
-from lib.utils import parse_tags, is_older_than, is_newer_than
-from lib.errors import FieldError, OperatorError, RuleValidationError
-from lib.logging import get_logger
+from qbittorrent_automation.api import QBittorrentAPI
+from qbittorrent_automation.utils import parse_tags, is_older_than, is_newer_than
+from qbittorrent_automation.errors import FieldError, OperatorError, RuleValidationError
+from qbittorrent_automation.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -347,7 +347,7 @@ class ActionExecutor:
         try:
             # Check idempotency before executing
             if self._should_skip_idempotent(torrent, action_type, params):
-                logger.info(f"{torrent['name']} - {action_type} already in desired state (skipped)")
+                logger.info(f"  {torrent['name']} - {action_type} already in desired state (skipped)")
                 return True, True
             if self.dry_run:
                 self._log_dry_run(torrent, action_type, params)
@@ -387,9 +387,9 @@ class ActionExecutor:
         """Log what would happen in dry run"""
         if action_type == 'delete_torrent':
             keep_files = params.get('keep_files', False)
-            logger.info(f"Would delete {torrent['name']} (keep_files={keep_files})")
+            logger.info(f"  Would delete {torrent['name']} (keep_files={keep_files})")
         else:
-            logger.info(f"Would {action_type} {torrent['name']} (params={params})")
+            logger.info(f"  Would {action_type} {torrent['name']} (params={params})")
 
     def _execute_action(self, torrent: Dict, action_type: str, params: Dict) -> bool:
         """Execute the actual action"""
@@ -398,59 +398,59 @@ class ActionExecutor:
         if action_type == 'stop':
             success = self.api.stop_torrents([torrent_hash])
             if success:
-                logger.info(f"Stopped {torrent['name']}")
+                logger.info(f"  Stopped {torrent['name']}")
             return success
 
         elif action_type == 'start':
             success = self.api.start_torrents([torrent_hash])
             if success:
-                logger.info(f"Started {torrent['name']}")
+                logger.info(f"  Started {torrent['name']}")
             return success
 
         elif action_type == 'force_start':
             success = self.api.force_start_torrents([torrent_hash])
             if success:
-                logger.info(f"Force started {torrent['name']}")
+                logger.info(f"  Force started {torrent['name']}")
             return success
 
         elif action_type == 'recheck':
             success = self.api.recheck_torrents([torrent_hash])
             if success:
-                logger.info(f"Rechecking {torrent['name']}")
+                logger.info(f"  Rechecking {torrent['name']}")
             return success
 
         elif action_type == 'reannounce':
             success = self.api.reannounce_torrents([torrent_hash])
             if success:
-                logger.info(f"Reannouncing {torrent['name']}")
+                logger.info(f"  Reannouncing {torrent['name']}")
             return success
 
         elif action_type == 'delete_torrent':
             keep_files = params.get('keep_files', False)
             success = self.api.delete_torrents([torrent_hash], delete_files=not keep_files)
             if success:
-                logger.info(f"Deleted {torrent['name']} (keep_files={keep_files})")
+                logger.info(f"  Deleted {torrent['name']} (keep_files={keep_files})")
             return success
 
         elif action_type == 'set_category':
             category = params.get('category', '')
             success = self.api.set_category([torrent_hash], category)
             if success:
-                logger.info(f"Set category for {torrent['name']} to {category}")
+                logger.info(f"  Set category for {torrent['name']} to {category}")
             return success
 
         elif action_type == 'add_tag':
             tags = params.get('tags', [])
             success = self.api.add_tags([torrent_hash], tags)
             if success:
-                logger.info(f"Added tags {tags} to {torrent['name']}")
+                logger.info(f"  Added tags {tags} to {torrent['name']}")
             return success
 
         elif action_type == 'remove_tag':
             tags = params.get('tags', [])
             success = self.api.remove_tags([torrent_hash], tags)
             if success:
-                logger.info(f"Removed tags {tags} from {torrent['name']}")
+                logger.info(f"  Removed tags {tags} from {torrent['name']}")
             return success
 
         elif action_type == 'set_tags':
@@ -461,25 +461,25 @@ class ActionExecutor:
                 self.api.remove_tags([torrent_hash], current_tags)
             success = self.api.add_tags([torrent_hash], new_tags)
             if success:
-                logger.info(f"Set tags for {torrent['name']} to {new_tags}")
+                logger.info(f"  Set tags for {torrent['name']} to {new_tags}")
             return success
 
         elif action_type == 'set_upload_limit':
             limit = params.get('limit', -1)
             success = self.api.set_upload_limit([torrent_hash], limit)
             if success:
-                logger.info(f"Set upload limit for {torrent['name']} to {limit}")
+                logger.info(f"  Set upload limit for {torrent['name']} to {limit}")
             return success
 
         elif action_type == 'set_download_limit':
             limit = params.get('limit', -1)
             success = self.api.set_download_limit([torrent_hash], limit)
             if success:
-                logger.info(f"Set download limit for {torrent['name']} to {limit}")
+                logger.info(f"  Set download limit for {torrent['name']} to {limit}")
             return success
 
         else:
-            logger.error(f"Unknown action type: {action_type}")
+            logger.error(f"  Unknown action type: {action_type}")
             return False
 
 
@@ -574,7 +574,7 @@ class RulesEngine:
                             processed_torrents.add(torrent['hash'])
 
                 if matched_count > 0:
-                    logger.info(f"Rule '{rule.get('name', 'unnamed')}' matched {matched_count} torrent(s)")
+                    logger.info(f"  Rule '{rule.get('name', 'unnamed')}' matched {matched_count} torrent(s)")
 
             self.stats.processed = len(processed_torrents)
 

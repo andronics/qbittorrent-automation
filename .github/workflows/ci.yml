@@ -20,55 +20,65 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install package with dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests pyyaml
-          echo "✓ Dependencies installed"
+          pip install -e ".[dev]"
+          echo "✓ Package and dependencies installed"
 
       - name: Validate Python syntax
         run: |
-          python -m py_compile lib/*.py
+          python -m py_compile src/qbittorrent_automation/*.py
+          python -m py_compile src/qbittorrent_automation/cli/*.py
           python -m py_compile triggers/*.py
           echo "✓ All Python files have valid syntax"
 
       - name: Test module imports
         run: |
-          python -c "from lib.api import QBittorrentAPI; print('✓ lib.api')"
-          python -c "from lib.config import load_config; print('✓ lib.config')"
-          python -c "from lib.engine import RulesEngine; print('✓ lib.engine')"
-          python -c "from lib.errors import *; print('✓ lib.errors')"
-          python -c "from lib.utils import *; print('✓ lib.utils')"
-          python -c "from lib.logging import setup_logging; print('✓ lib.logging')"
-          python -c "from lib.arguments import create_parser; print('✓ lib.arguments')"
+          python -c "from qbittorrent_automation.api import QBittorrentAPI; print('✓ qbittorrent_automation.api')"
+          python -c "from qbittorrent_automation.config import load_config; print('✓ qbittorrent_automation.config')"
+          python -c "from qbittorrent_automation.engine import RulesEngine; print('✓ qbittorrent_automation.engine')"
+          python -c "from qbittorrent_automation.errors import *; print('✓ qbittorrent_automation.errors')"
+          python -c "from qbittorrent_automation.utils import *; print('✓ qbittorrent_automation.utils')"
+          python -c "from qbittorrent_automation.logging import setup_logging; print('✓ qbittorrent_automation.logging')"
+          python -c "from qbittorrent_automation.arguments import create_parser; print('✓ qbittorrent_automation.arguments')"
+          python -c "from qbittorrent_automation.cli.manual import main; print('✓ qbittorrent_automation.cli.manual')"
           echo "✓ All modules import successfully"
 
-      - name: Lint with ruff (if available)
+      - name: Run tests
+        run: |
+          pytest tests/ -v --cov=qbittorrent_automation --cov-report=term-missing
+          echo "✓ All tests passed"
+
+      - name: Lint with ruff
         continue-on-error: true
         run: |
-          pip install ruff 2>/dev/null || { echo "Ruff not available, skipping"; exit 0; }
-          ruff check lib/ triggers/ || echo "Linting issues found (non-blocking)"
+          ruff check src/ triggers/ || echo "Linting issues found (non-blocking)"
 
       - name: Check code formatting
         continue-on-error: true
         run: |
-          pip install black 2>/dev/null || { echo "Black not available, skipping"; exit 0; }
-          black --check lib/ triggers/ || echo "Formatting issues found (non-blocking)"
+          black --check src/ triggers/ || echo "Formatting issues found (non-blocking)"
+
+      - name: Type check with mypy
+        continue-on-error: true
+        run: |
+          mypy src/qbittorrent_automation --ignore-missing-imports || echo "Type issues found (non-blocking)"
 
       - name: Verify version file
         run: |
-          python -c "from lib.__version__ import __version__; print(f'Version: {__version__}')"
+          python -c "from qbittorrent_automation.__version__ import __version__; print(f'Version: {__version__}')"
           echo "✓ Version file is valid"
 
       - name: Check for common issues
         run: |
           # Check for print statements (should use logger)
-          if grep -r "print(" lib/ triggers/ --include="*.py" | grep -v "# print OK" | grep -v "__pycache__"; then
+          if grep -r "print(" src/ triggers/ --include="*.py" | grep -v "# print OK" | grep -v "__pycache__"; then
             echo "Warning: Found print() statements. Consider using logger instead."
           fi
 
           # Check for hardcoded credentials
-          if grep -rE "(password|token|secret|key)\s*=\s*['\"][^'\"]{8,}" lib/ triggers/ --include="*.py" | grep -v "password ="; then
+          if grep -rE "(password|token|secret|key)\s*=\s*['\"][^'\"]{8,}" src/ triggers/ --include="*.py" | grep -v "password ="; then
             echo "Warning: Potential hardcoded credentials found!"
             exit 1
           fi
@@ -94,9 +104,14 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
       - name: Check version format
         run: |
-          VERSION=$(python -c "from lib.__version__ import __version__; print(__version__)")
+          VERSION=$(python -c "from qbittorrent_automation.__version__ import __version__; print(__version__)")
           echo "Current version: $VERSION"
 
           # Validate semver format
