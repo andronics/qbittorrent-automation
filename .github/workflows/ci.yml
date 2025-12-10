@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test Python Code
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pyyaml
+          echo "✓ Dependencies installed"
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile lib/*.py
+          python -m py_compile triggers/*.py
+          echo "✓ All Python files have valid syntax"
+
+      - name: Test module imports
+        run: |
+          python -c "from lib.api import QBittorrentAPI; print('✓ lib.api')"
+          python -c "from lib.config import load_config; print('✓ lib.config')"
+          python -c "from lib.engine import RulesEngine; print('✓ lib.engine')"
+          python -c "from lib.errors import *; print('✓ lib.errors')"
+          python -c "from lib.utils import *; print('✓ lib.utils')"
+          python -c "from lib.logging import setup_logging; print('✓ lib.logging')"
+          python -c "from lib.arguments import create_parser; print('✓ lib.arguments')"
+          echo "✓ All modules import successfully"
+
+      - name: Lint with ruff (if available)
+        continue-on-error: true
+        run: |
+          pip install ruff 2>/dev/null || { echo "Ruff not available, skipping"; exit 0; }
+          ruff check lib/ triggers/ || echo "Linting issues found (non-blocking)"
+
+      - name: Check code formatting
+        continue-on-error: true
+        run: |
+          pip install black 2>/dev/null || { echo "Black not available, skipping"; exit 0; }
+          black --check lib/ triggers/ || echo "Formatting issues found (non-blocking)"
+
+      - name: Verify version file
+        run: |
+          python -c "from lib.__version__ import __version__; print(f'Version: {__version__}')"
+          echo "✓ Version file is valid"
+
+      - name: Check for common issues
+        run: |
+          # Check for print statements (should use logger)
+          if grep -r "print(" lib/ triggers/ --include="*.py" | grep -v "# print OK" | grep -v "__pycache__"; then
+            echo "Warning: Found print() statements. Consider using logger instead."
+          fi
+
+          # Check for hardcoded credentials
+          if grep -rE "(password|token|secret|key)\s*=\s*['\"][^'\"]{8,}" lib/ triggers/ --include="*.py" | grep -v "password ="; then
+            echo "Warning: Potential hardcoded credentials found!"
+            exit 1
+          fi
+
+          echo "✓ No common issues found"
+
+      - name: Validate configuration examples
+        run: |
+          python -c "import yaml; yaml.safe_load(open('config/config.example.yml'))"
+          python -c "import yaml; yaml.safe_load(open('config/rules.example.yml'))"
+          echo "✓ Configuration examples are valid YAML"
+
+  validate-version:
+    name: Validate Version Format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Check version format
+        run: |
+          VERSION=$(python -c "from lib.__version__ import __version__; print(__version__)")
+          echo "Current version: $VERSION"
+
+          # Validate semver format
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "Error: Version must follow semantic versioning (1.2.3 or 1.2.3-beta.1)"
+            exit 1
+          fi
+
+          echo "✓ Version format is valid"

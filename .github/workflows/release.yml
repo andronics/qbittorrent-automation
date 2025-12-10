@@ -1,0 +1,158 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag version (e.g., v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+
+          # Validate semver format
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "Error: Tag must follow semantic versioning (v1.2.3 or v1.2.3-beta.1)"
+            exit 1
+          fi
+
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Release version: $TAG ($VERSION)"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Update version in code
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          sed -i "s/__version__ = .*/__version__ = \"$VERSION\"/" lib/__version__.py
+          echo "Updated lib/__version__.py to version $VERSION"
+          cat lib/__version__.py
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile lib/*.py triggers/*.py
+          echo "✓ All Python files have valid syntax"
+
+      - name: Test imports
+        run: |
+          python -c "from lib.api import QBittorrentAPI; print('✓ lib.api imports successfully')"
+          python -c "from lib.config import load_config; print('✓ lib.config imports successfully')"
+          python -c "from lib.engine import RulesEngine; print('✓ lib.engine imports successfully')"
+          echo "✓ All critical imports successful"
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # Get previous tag
+          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | sed -n '2p')
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "First release - no previous tag found"
+            CHANGELOG="## First Release
+
+            This is the initial release of qBittorrent Automation System."
+          else
+            echo "Generating changelog from $PREV_TAG to ${{ steps.version.outputs.tag }}"
+
+            # Generate changelog from commits
+            CHANGELOG="## Changes since $PREV_TAG"$'\n\n'
+
+            # Group commits by type
+            FEATURES=$(git log $PREV_TAG..${{ steps.version.outputs.tag }} --pretty=format:"- %s" --grep="^feat" | head -20)
+            FIXES=$(git log $PREV_TAG..${{ steps.version.outputs.tag }} --pretty=format:"- %s" --grep="^fix" | head -20)
+            REFACTORS=$(git log $PREV_TAG..${{ steps.version.outputs.tag }} --pretty=format:"- %s" --grep="^refactor" | head -20)
+            CHORES=$(git log $PREV_TAG..${{ steps.version.outputs.tag }} --pretty=format:"- %s" --grep="^chore" | head -20)
+
+            if [ -n "$FEATURES" ]; then
+              CHANGELOG="${CHANGELOG}### ✨ New Features"$'\n'"$FEATURES"$'\n\n'
+            fi
+
+            if [ -n "$FIXES" ]; then
+              CHANGELOG="${CHANGELOG}### 🐛 Bug Fixes"$'\n'"$FIXES"$'\n\n'
+            fi
+
+            if [ -n "$REFACTORS" ]; then
+              CHANGELOG="${CHANGELOG}### ♻️ Refactoring"$'\n'"$REFACTORS"$'\n\n'
+            fi
+
+            if [ -n "$CHORES" ]; then
+              CHANGELOG="${CHANGELOG}### 🔧 Maintenance"$'\n'"$CHORES"$'\n\n'
+            fi
+          fi
+
+          # Save to file
+          echo "$CHANGELOG" > release-notes.md
+          cat release-notes.md
+
+      - name: Create release archive
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ARCHIVE="qbittorrent-automation-v${VERSION}.zip"
+
+          # Create archive with scripts, configs, docs
+          zip -r "$ARCHIVE" \
+            lib/ \
+            triggers/ \
+            config/*.example.yml \
+            README.md \
+            .gitignore \
+            -x "**/__pycache__/*" "**/*.pyc"
+
+          echo "Created $ARCHIVE"
+          ls -lh "$ARCHIVE"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Release ${{ steps.version.outputs.tag }}
+          body_path: release-notes.md
+          files: |
+            qbittorrent-automation-v${{ steps.version.outputs.version }}.zip
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Commit version update
+        if: github.event_name == 'push'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet lib/__version__.py; then
+            echo "No version changes to commit"
+          else
+            git add lib/__version__.py
+            git commit -m "chore: Bump version to ${{ steps.version.outputs.version }}"
+            git push origin HEAD:main || echo "Could not push to main (might be protected)"
+          fi
