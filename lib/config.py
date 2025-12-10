@@ -181,17 +181,19 @@ class Config:
         """Check if dry-run mode is enabled"""
         # ENV var takes precedence
         env_dry_run = os.environ.get('DRY_RUN', '').lower()
-        if env_dry_run in ['true', '1', 'yes']:
+        if env_dry_run in ('true', '1', 'yes', 'on'):
             return True
-        elif env_dry_run in ['false', '0', 'no']:
-            return False
-        # TEMP FIX: Need to implement proper boolean parsing for config file
-        # CLAUDE: Added proper boolean parsing for config file
-        elif self.get('engine.dry_run', False).lower() in ['false', '0', 'no']:
+        elif env_dry_run in ('false', '0', 'no', 'off'):
             return False
 
         # Fall back to config file
-        return self.get('engine.dry_run', False)
+        config_value = self.get('engine.dry_run', False)
+
+        # Handle string values from YAML
+        if isinstance(config_value, str):
+            return config_value.lower() in ('true', '1', 'yes', 'on')
+
+        return bool(config_value)
 
     def get_log_level(self) -> str:
         """Get logging level"""
