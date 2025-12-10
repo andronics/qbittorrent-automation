@@ -37,5 +37,9 @@ Thumbs.db
 .coverage
 htmlcov/
 
+# User-specific config
+config/config.yml
+config/rules.yml
+
 # User-specific logs
 config/logs/*.log
