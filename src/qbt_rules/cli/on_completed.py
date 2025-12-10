@@ -14,12 +14,12 @@ Usage:
 import sys
 import logging
 
-from qbittorrent_automation.arguments import create_parser, process_args, handle_utility_args, validate_torrent_hash
-from qbittorrent_automation.config import load_config
-from qbittorrent_automation.api import QBittorrentAPI
-from qbittorrent_automation.engine import RulesEngine
-from qbittorrent_automation.errors import handle_errors
-from qbittorrent_automation.logging import setup_logging, get_logger
+from qbt_rules.arguments import create_parser, process_args, handle_utility_args, validate_torrent_hash
+from qbt_rules.config import load_config
+from qbt_rules.api import QBittorrentAPI
+from qbt_rules.engine import RulesEngine
+from qbt_rules.errors import handle_errors
+from qbt_rules.logging import setup_logging, get_logger
 
 
 @handle_errors

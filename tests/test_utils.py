@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from qbittorrent_automation.utils import parse_tags, is_older_than, is_newer_than
+from qbt_rules.utils import parse_tags, is_older_than, is_newer_than
 
 
 def test_parse_tags_empty():

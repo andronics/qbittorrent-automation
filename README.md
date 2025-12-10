@@ -1,15 +1,15 @@
-# qBittorrent Automation
+# qbt-rules
 
 A powerful Python-based rules engine for automating torrent management in qBittorrent using declarative YAML configuration.
 
-[![GitHub Release](https://img.shields.io/github/v/release/andronics/qbittorrent-automation)](https://github.com/andronics/qbittorrent-automation/releases)
+[![GitHub Release](https://img.shields.io/github/v/release/andronics/qbt-rules)](https://github.com/andronics/qbt-rules/releases)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](http://unlicense.org/)
 
 ---
 
-## What is qBittorrent Automation?
+## What is qbt-rules?
 
-qBittorrent Automation is a Python-based rules engine that automates torrent management through the qBittorrent Web API v5.0+. Define YAML-based rules to automatically categorize, tag, pause, resume, delete, and manage torrents based on flexible conditions.
+qbt-rules is a Python-based rules engine that automates torrent management through the qBittorrent Web API v5.0+. Define YAML-based rules to automatically categorize, tag, pause, resume, delete, and manage torrents based on flexible conditions.
 
 **Key Features:**
 
@@ -31,27 +31,27 @@ qBittorrent Automation is a Python-based rules engine that automates torrent man
 
 ```bash
 # Install the package
-pip install qbittorrent-automation
+pip install qbt-rules
 
 # Create config directory
-mkdir -p ~/.config/qbittorrent-automation
+mkdir -p ~/.config/qbt-rules
 
 # Download example configs
-curl -o ~/.config/qbittorrent-automation/config.yml \
-  https://raw.githubusercontent.com/andronics/qbittorrent-automation/main/config/config.example.yml
-curl -o ~/.config/qbittorrent-automation/rules.yml \
-  https://raw.githubusercontent.com/andronics/qbittorrent-automation/main/config/rules.example.yml
+curl -o ~/.config/qbt-rules/config.yml \
+  https://raw.githubusercontent.com/andronics/qbt-rules/main/config/config.example.yml
+curl -o ~/.config/qbt-rules/rules.yml \
+  https://raw.githubusercontent.com/andronics/qbt-rules/main/config/rules.example.yml
 
 # Edit config with your qBittorrent credentials
-nano ~/.config/qbittorrent-automation/config.yml
+nano ~/.config/qbt-rules/config.yml
 ```
 
 **Option 2: Install from source**
 
 ```bash
 # Clone the repository
-git clone https://github.com/andronics/qbittorrent-automation.git
-cd qbittorrent-automation
+git clone https://github.com/andronics/qbt-rules.git
+cd qbt-rules
 
 # Install in editable mode with development dependencies
 pip install -e ".[dev]"
@@ -106,7 +106,7 @@ qbt-manual --trace
 **Using Python module:**
 
 ```bash
-python -m qbittorrent_automation.cli.manual --dry-run
+python -m qbt_rules.cli.manual --dry-run
 ```
 
 **Legacy method (still works):**
@@ -166,7 +166,7 @@ python triggers/manual.py --dry-run
 | **on_added** | Webhook when torrent added | Auto-categorize new downloads |
 | **on_completed** | Webhook when download completes | Post-processing, seeding rules |
 
-**[📖 Detailed Trigger Documentation](https://github.com/andronics/qbittorrent-automation/wiki/Triggers)**
+**[📖 Detailed Trigger Documentation](https://github.com/andronics/qbt-rules/wiki/Triggers)**
 
 ### Conditions
 
@@ -180,7 +180,7 @@ Combine conditions with logical groups:
 
 `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `not_contains`, `matches`, `in`, `not_in`, `older_than`, `newer_than`
 
-**[📖 Detailed Condition Documentation](https://github.com/andronics/qbittorrent-automation/wiki/Conditions)**
+**[📖 Detailed Condition Documentation](https://github.com/andronics/qbt-rules/wiki/Conditions)**
 
 ### Available Fields
 
@@ -197,7 +197,7 @@ Access torrent data using dot notation across 8 API categories:
 | `peers.*` | Peer data (collection) | `peers.ip`, `peers.client`, `peers.progress` |
 | `webseeds.*` | Web seed data (collection) | `webseeds.url` |
 
-**[📖 Complete Field Reference](https://github.com/andronics/qbittorrent-automation/wiki/Available-Fields)**
+**[📖 Complete Field Reference](https://github.com/andronics/qbt-rules/wiki/Available-Fields)**
 
 ### Actions
 
@@ -212,7 +212,7 @@ Execute one or more actions when conditions match:
 | `add_tag` / `remove_tag` / `set_tags` | Manage tags |
 | `set_upload_limit` / `set_download_limit` | Speed limiting |
 
-**[📖 Detailed Action Documentation](https://github.com/andronics/qbittorrent-automation/wiki/Actions)**
+**[📖 Detailed Action Documentation](https://github.com/andronics/qbt-rules/wiki/Actions)**
 
 ---
 
@@ -277,7 +277,7 @@ Execute one or more actions when conditions match:
     - type: force_start
 ```
 
-**[📖 More Examples](https://github.com/andronics/qbittorrent-automation/wiki/Examples)**
+**[📖 More Examples](https://github.com/andronics/qbt-rules/wiki/Examples)**
 
 ---
 
@@ -299,19 +299,19 @@ Execute one or more actions when conditions match:
 
 ```bash
 # Run every hour
-0 * * * * cd /path/to/qbittorrent-automation && python triggers/scheduled.py
+0 * * * * cd /path/to/qbt-rules && python triggers/scheduled.py
 
 # Run daily at 3 AM
-0 3 * * * cd /path/to/qbittorrent-automation && python triggers/scheduled.py
+0 3 * * * cd /path/to/qbt-rules && python triggers/scheduled.py
 ```
 
 ### Systemd Timer
 
-Create `/etc/systemd/system/qbittorrent-automation.service`:
+Create `/etc/systemd/system/qbt-rules.service`:
 
 ```ini
 [Unit]
-Description=qBittorrent Automation
+Description=qbt-rules - qBittorrent Automation
 After=network.target
 
 [Service]
@@ -321,11 +321,11 @@ User=qbittorrent
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 ```
 
-Create `/etc/systemd/system/qbittorrent-automation.timer`:
+Create `/etc/systemd/system/qbt-rules.timer`:
 
 ```ini
 [Unit]
-Description=Run qBittorrent Automation hourly
+Description=Run qbt-rules hourly
 
 [Timer]
 OnCalendar=hourly
@@ -337,8 +337,8 @@ WantedBy=timers.target
 
 Enable:
 ```bash
-sudo systemctl enable qbittorrent-automation.timer
-sudo systemctl start qbittorrent-automation.timer
+sudo systemctl enable qbt-rules.timer
+sudo systemctl start qbt-rules.timer
 ```
 
 ### Docker
@@ -349,7 +349,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install the package
-RUN pip install qbittorrent-automation
+RUN pip install qbt-rules
 
 # Copy configuration files
 COPY config/ /app/config/
@@ -358,25 +358,25 @@ COPY config/ /app/config/
 CMD ["sh", "-c", "while true; do qbt-scheduled; sleep 3600; done"]
 ```
 
-**[📖 Deployment Guide](https://github.com/andronics/qbittorrent-automation/wiki/Deployment)**
+**[📖 Deployment Guide](https://github.com/andronics/qbt-rules/wiki/Deployment)**
 
 ---
 
 ## Documentation
 
-**Complete documentation is available on the [GitHub Wiki](https://github.com/andronics/qbittorrent-automation/wiki):**
+**Complete documentation is available on the [GitHub Wiki](https://github.com/andronics/qbt-rules/wiki):**
 
-- **[Getting Started](https://github.com/andronics/qbittorrent-automation/wiki/Quick-Start)** - Installation and first rule
-- **[Configuration Reference](https://github.com/andronics/qbittorrent-automation/wiki/Configuration)** - config.yml and rules.yml
-- **[Rules Architecture](https://github.com/andronics/qbittorrent-automation/wiki/Rules-Architecture)** - How rules are evaluated
-- **[Triggers](https://github.com/andronics/qbittorrent-automation/wiki/Triggers)** - Manual, scheduled, webhooks
-- **[Conditions](https://github.com/andronics/qbittorrent-automation/wiki/Conditions)** - Operators and logical groups
-- **[Available Fields](https://github.com/andronics/qbittorrent-automation/wiki/Available-Fields)** - Complete field reference
-- **[Actions](https://github.com/andronics/qbittorrent-automation/wiki/Actions)** - All available actions
-- **[Examples](https://github.com/andronics/qbittorrent-automation/wiki/Examples)** - Real-world use cases
-- **[FAQ](https://github.com/andronics/qbittorrent-automation/wiki/FAQ)** - Common questions
-- **[Troubleshooting](https://github.com/andronics/qbittorrent-automation/wiki/Troubleshooting)** - Debug and fix issues
-- **[Advanced Topics](https://github.com/andronics/qbittorrent-automation/wiki/Advanced-Topics)** - Performance, security, extending
+- **[Getting Started](https://github.com/andronics/qbt-rules/wiki/Quick-Start)** - Installation and first rule
+- **[Configuration Reference](https://github.com/andronics/qbt-rules/wiki/Configuration)** - config.yml and rules.yml
+- **[Rules Architecture](https://github.com/andronics/qbt-rules/wiki/Rules-Architecture)** - How rules are evaluated
+- **[Triggers](https://github.com/andronics/qbt-rules/wiki/Triggers)** - Manual, scheduled, webhooks
+- **[Conditions](https://github.com/andronics/qbt-rules/wiki/Conditions)** - Operators and logical groups
+- **[Available Fields](https://github.com/andronics/qbt-rules/wiki/Available-Fields)** - Complete field reference
+- **[Actions](https://github.com/andronics/qbt-rules/wiki/Actions)** - All available actions
+- **[Examples](https://github.com/andronics/qbt-rules/wiki/Examples)** - Real-world use cases
+- **[FAQ](https://github.com/andronics/qbt-rules/wiki/FAQ)** - Common questions
+- **[Troubleshooting](https://github.com/andronics/qbt-rules/wiki/Troubleshooting)** - Debug and fix issues
+- **[Advanced Topics](https://github.com/andronics/qbt-rules/wiki/Advanced-Topics)** - Performance, security, extending
 
 ---
 
@@ -390,7 +390,7 @@ CMD ["sh", "-c", "while true; do qbt-scheduled; sleep 3600; done"]
 
 ## Contributing
 
-Contributions are welcome! Please see the [Contributing Guide](https://github.com/andronics/qbittorrent-automation/wiki/Contributing) on the wiki.
+Contributions are welcome! Please see the [Contributing Guide](https://github.com/andronics/qbt-rules/wiki/Contributing) on the wiki.
 
 ---
 
@@ -398,7 +398,7 @@ Contributions are welcome! Please see the [Contributing Guide](https://github.co
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 
-**Latest Release:** [v0.0.1](https://github.com/andronics/qbittorrent-automation/releases/tag/v0.0.1) - 2024-12-10
+**Latest Release:** [v0.2.0](https://github.com/andronics/qbt-rules/releases/tag/v0.2.0) - 2024-12-10
 
 ---
 
@@ -412,4 +412,4 @@ You are free to use, modify, and distribute this software for any purpose withou
 
 **Happy automating! 🚀**
 
-For detailed documentation, visit the [GitHub Wiki](https://github.com/andronics/qbittorrent-automation/wiki).
+For detailed documentation, visit the [GitHub Wiki](https://github.com/andronics/qbt-rules/wiki).

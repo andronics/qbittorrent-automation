@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from qbittorrent_automation.config import expand_env_vars, load_config, Config
-from qbittorrent_automation.errors import ConfigurationError
+from qbt_rules.config import expand_env_vars, load_config, Config
+from qbt_rules.errors import ConfigurationError
 
 
 def test_expand_env_vars_simple():

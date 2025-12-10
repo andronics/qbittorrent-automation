@@ -53,20 +53,21 @@ jobs:
       - name: Update version in code
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          sed -i "s/__version__ = .*/__version__ = \"$VERSION\"/" lib/__version__.py
-          echo "Updated lib/__version__.py to version $VERSION"
-          cat lib/__version__.py
+          sed -i "s/__version__ = .*/__version__ = \"$VERSION\"/" src/qbt_rules/__version__.py
+          echo "Updated src/qbt_rules/__version__.py to version $VERSION"
+          cat src/qbt_rules/__version__.py
 
-      - name: Validate Python syntax
+      - name: Install package
         run: |
-          python -m py_compile lib/*.py triggers/*.py
-          echo "✓ All Python files have valid syntax"
+          python -m pip install --upgrade pip
+          pip install -e .
+          echo "✓ Package installed successfully"
 
       - name: Test imports
         run: |
-          python -c "from lib.api import QBittorrentAPI; print('✓ lib.api imports successfully')"
-          python -c "from lib.config import load_config; print('✓ lib.config imports successfully')"
-          python -c "from lib.engine import RulesEngine; print('✓ lib.engine imports successfully')"
+          python -c "from qbt_rules.api import QBittorrentAPI; print('✓ qbt_rules.api imports successfully')"
+          python -c "from qbt_rules.config import load_config; print('✓ qbt_rules.config imports successfully')"
+          python -c "from qbt_rules.engine import RulesEngine; print('✓ qbt_rules.engine imports successfully')"
           echo "✓ All critical imports successful"
 
       - name: Generate changelog
@@ -79,7 +80,7 @@ jobs:
             echo "First release - no previous tag found"
             CHANGELOG="## First Release
 
-            This is the initial release of qBittorrent Automation System."
+            This is the initial release of qbt-rules."
           else
             echo "Generating changelog from $PREV_TAG to ${{ steps.version.outputs.tag }}"
 
@@ -116,14 +117,16 @@ jobs:
       - name: Create release archive
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          ARCHIVE="qbittorrent-automation-v${VERSION}.zip"
+          ARCHIVE="qbt-rules-v${VERSION}.zip"
 
-          # Create archive with scripts, configs, docs
+          # Create archive with source, configs, docs
           zip -r "$ARCHIVE" \
-            lib/ \
+            src/ \
             triggers/ \
             config/*.example.yml \
+            pyproject.toml \
             README.md \
+            LICENSE \
             .gitignore \
             -x "**/__pycache__/*" "**/*.pyc"
 
@@ -137,7 +140,7 @@ jobs:
           name: Release ${{ steps.version.outputs.tag }}
           body_path: release-notes.md
           files: |
-            qbittorrent-automation-v${{ steps.version.outputs.version }}.zip
+            qbt-rules-v${{ steps.version.outputs.version }}.zip
           draft: false
           prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
         env:
@@ -149,10 +152,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if git diff --quiet lib/__version__.py; then
+          if git diff --quiet src/qbt_rules/__version__.py; then
             echo "No version changes to commit"
           else
-            git add lib/__version__.py
+            git add src/qbt_rules/__version__.py
             git commit -m "chore: Bump version to ${{ steps.version.outputs.version }}"
             git push origin HEAD:main || echo "Could not push to main (might be protected)"
           fi

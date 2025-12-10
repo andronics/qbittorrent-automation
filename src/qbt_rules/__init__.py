@@ -5,6 +5,6 @@ This package provides a declarative YAML-based rules engine for managing
 torrents in qBittorrent through the Web API.
 """
 
-from qbittorrent_automation.__version__ import __version__
+from qbt_rules.__version__ import __version__
 
 __all__ = ["__version__"]

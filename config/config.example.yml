@@ -1,4 +1,4 @@
-# qBittorrent Automation - Configuration Settings
+# qbt-rules - Configuration Settings
 #
 # This file contains connection settings, logging configuration, and engine options.
 # For rules, see rules.yml
@@ -14,7 +14,7 @@ qbittorrent:
 # Logging configuration
 logging:
   level: ${LOG_LEVEL:-INFO}  # DEBUG, INFO, WARNING, ERROR
-  file: ${LOG_FILE:-logs/qbittorrent-automation.log}  # Relative to CONFIG_DIR
+  file: ${LOG_FILE:-logs/qbt-rules.log}  # Relative to CONFIG_DIR
   trace_mode: ${TRACE_MODE:-false}  # Include module/function/line in logs
 
 # Engine settings

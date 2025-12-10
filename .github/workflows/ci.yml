@@ -28,26 +28,26 @@ jobs:
 
       - name: Validate Python syntax
         run: |
-          python -m py_compile src/qbittorrent_automation/*.py
-          python -m py_compile src/qbittorrent_automation/cli/*.py
+          python -m py_compile src/qbt_rules/*.py
+          python -m py_compile src/qbt_rules/cli/*.py
           python -m py_compile triggers/*.py
           echo "✓ All Python files have valid syntax"
 
       - name: Test module imports
         run: |
-          python -c "from qbittorrent_automation.api import QBittorrentAPI; print('✓ qbittorrent_automation.api')"
-          python -c "from qbittorrent_automation.config import load_config; print('✓ qbittorrent_automation.config')"
-          python -c "from qbittorrent_automation.engine import RulesEngine; print('✓ qbittorrent_automation.engine')"
-          python -c "from qbittorrent_automation.errors import *; print('✓ qbittorrent_automation.errors')"
-          python -c "from qbittorrent_automation.utils import *; print('✓ qbittorrent_automation.utils')"
-          python -c "from qbittorrent_automation.logging import setup_logging; print('✓ qbittorrent_automation.logging')"
-          python -c "from qbittorrent_automation.arguments import create_parser; print('✓ qbittorrent_automation.arguments')"
-          python -c "from qbittorrent_automation.cli.manual import main; print('✓ qbittorrent_automation.cli.manual')"
+          python -c "from qbt_rules.api import QBittorrentAPI; print('✓ qbt_rules.api')"
+          python -c "from qbt_rules.config import load_config; print('✓ qbt_rules.config')"
+          python -c "from qbt_rules.engine import RulesEngine; print('✓ qbt_rules.engine')"
+          python -c "from qbt_rules.errors import *; print('✓ qbt_rules.errors')"
+          python -c "from qbt_rules.utils import *; print('✓ qbt_rules.utils')"
+          python -c "from qbt_rules.logging import setup_logging; print('✓ qbt_rules.logging')"
+          python -c "from qbt_rules.arguments import create_parser; print('✓ qbt_rules.arguments')"
+          python -c "from qbt_rules.cli.manual import main; print('✓ qbt_rules.cli.manual')"
           echo "✓ All modules import successfully"
 
       - name: Run tests
         run: |
-          pytest tests/ -v --cov=qbittorrent_automation --cov-report=term-missing
+          pytest tests/ -v --cov=qbt_rules --cov-report=term-missing
           echo "✓ All tests passed"
 
       - name: Lint with ruff
@@ -63,11 +63,11 @@ jobs:
       - name: Type check with mypy
         continue-on-error: true
         run: |
-          mypy src/qbittorrent_automation --ignore-missing-imports || echo "Type issues found (non-blocking)"
+          mypy src/qbt_rules --ignore-missing-imports || echo "Type issues found (non-blocking)"
 
       - name: Verify version file
         run: |
-          python -c "from qbittorrent_automation.__version__ import __version__; print(f'Version: {__version__}')"
+          python -c "from qbt_rules.__version__ import __version__; print(f'Version: {__version__}')"
           echo "✓ Version file is valid"
 
       - name: Check for common issues
@@ -111,7 +111,7 @@ jobs:
 
       - name: Check version format
         run: |
-          VERSION=$(python -c "from qbittorrent_automation.__version__ import __version__; print(__version__)")
+          VERSION=$(python -c "from qbt_rules.__version__ import __version__; print(__version__)")
           echo "Current version: $VERSION"
 
           # Validate semver format

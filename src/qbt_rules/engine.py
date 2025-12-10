@@ -7,10 +7,10 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Tuple
 
-from qbittorrent_automation.api import QBittorrentAPI
-from qbittorrent_automation.utils import parse_tags, is_older_than, is_newer_than
-from qbittorrent_automation.errors import FieldError, OperatorError, RuleValidationError
-from qbittorrent_automation.logging import get_logger
+from qbt_rules.api import QBittorrentAPI
+from qbt_rules.utils import parse_tags, is_older_than, is_newer_than
+from qbt_rules.errors import FieldError, OperatorError, RuleValidationError
+from qbt_rules.logging import get_logger
 
 logger = get_logger(__name__)
 

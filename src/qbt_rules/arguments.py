@@ -9,7 +9,7 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-from qbittorrent_automation.__version__ import __version__, __description__
+from qbt_rules.__version__ import __version__, __description__
 
 
 def smart_config_default() -> str:

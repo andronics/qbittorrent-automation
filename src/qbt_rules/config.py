@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from qbittorrent_automation.errors import ConfigurationError
+from qbt_rules.errors import ConfigurationError
 
 
 def expand_env_vars(value: Any) -> Any:

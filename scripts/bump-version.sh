@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Version Bumping Script for qBittorrent Automation
+# Version Bumping Script for qbt-rules
 #
 # Usage: ./scripts/bump-version.sh [major|minor|patch]
 #
@@ -19,7 +19,7 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Get current version from __version__.py
-VERSION_FILE="$ROOT_DIR/lib/__version__.py"
+VERSION_FILE="$ROOT_DIR/src/qbt_rules/__version__.py"
 
 if [ ! -f "$VERSION_FILE" ]; then
     echo -e "${RED}Error: Cannot find $VERSION_FILE${NC}"
@@ -29,7 +29,7 @@ fi
 CURRENT_VERSION=$(grep -oP '__version__ = "\K[^"]+' "$VERSION_FILE")
 
 echo -e "${BLUE}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║   qBittorrent Automation Version Bumper     ║${NC}"
+echo -e "${BLUE}║         qbt-rules Version Bumper             ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════╝${NC}"
 echo
 echo -e "${YELLOW}Current version: ${GREEN}v${CURRENT_VERSION}${NC}"
@@ -136,5 +136,5 @@ echo -e "  ${YELLOW}2.${NC} Push to trigger release:"
 echo -e "     ${GREEN}git push && git push --tags${NC}"
 echo
 echo -e "  ${YELLOW}3.${NC} Monitor GitHub Actions for release build:"
-echo -e "     https://github.com/YOUR_USERNAME/qbittorrent-automation/actions"
+echo -e "     https://github.com/andronics/qbt-rules/actions"
 echo

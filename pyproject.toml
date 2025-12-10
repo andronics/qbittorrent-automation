@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "qbittorrent-automation"
-version = "0.1.0"
-description = "A powerful Python-based rules engine for automating torrent management in qBittorrent"
+name = "qbt-rules"
+version = "0.2.0"
+description = "A powerful Python-based rules engine for qBittorrent automation"
 readme = "README.md"
 authors = [
     {name = "andronics"},
@@ -44,17 +44,17 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/andronics/qbittorrent-automation"
-Documentation = "https://github.com/andronics/qbittorrent-automation/wiki"
-Repository = "https://github.com/andronics/qbittorrent-automation"
-Issues = "https://github.com/andronics/qbittorrent-automation/issues"
-Changelog = "https://github.com/andronics/qbittorrent-automation/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/andronics/qbt-rules"
+Documentation = "https://github.com/andronics/qbt-rules/wiki"
+Repository = "https://github.com/andronics/qbt-rules"
+Issues = "https://github.com/andronics/qbt-rules/issues"
+Changelog = "https://github.com/andronics/qbt-rules/blob/main/CHANGELOG.md"
 
 [project.scripts]
-qbt-manual = "qbittorrent_automation.cli.manual:main"
-qbt-scheduled = "qbittorrent_automation.cli.scheduled:main"
-qbt-on-added = "qbittorrent_automation.cli.on_added:main"
-qbt-on-completed = "qbittorrent_automation.cli.on_completed:main"
+qbt-manual = "qbt_rules.cli.manual:main"
+qbt-scheduled = "qbt_rules.cli.scheduled:main"
+qbt-on-added = "qbt_rules.cli.on_added:main"
+qbt-on-completed = "qbt_rules.cli.on_completed:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -63,7 +63,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-qbittorrent_automation = ["py.typed"]
+qbt_rules = ["py.typed"]
 
 # pytest configuration
 [tool.pytest.ini_options]
@@ -73,7 +73,7 @@ pythonpath = ["src"]
 addopts = [
     "--strict-markers",
     "--strict-config",
-    "--cov=qbittorrent_automation",
+    "--cov=qbt_rules",
     "--cov-report=term-missing",
     "--cov-report=html",
 ]
@@ -84,7 +84,7 @@ markers = [
 
 # coverage configuration
 [tool.coverage.run]
-source = ["src/qbittorrent_automation"]
+source = ["src/qbt_rules"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
@@ -158,7 +158,7 @@ strict_equality = true
 
 [[tool.mypy.overrides]]
 module = [
-    "qbittorrent_automation.*",
+    "qbt_rules.*",
 ]
 ignore_missing_imports = true
 
