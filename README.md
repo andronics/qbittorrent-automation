@@ -218,8 +218,8 @@ Where `%I` is the torrent hash.
 
 ## Available Actions
 
-- `pause` - Pause torrent
-- `resume` - Resume torrent
+- `stop` - Stop/pause torrent (qBittorrent v5.0+)
+- `start` - Start/resume torrent (qBittorrent v5.0+)
 - `force_start` - Force start torrent
 - `recheck` - Recheck torrent files
 - `reannounce` - Reannounce to trackers

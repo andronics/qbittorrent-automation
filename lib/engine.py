@@ -361,10 +361,10 @@ class ActionExecutor:
 
     def _should_skip_idempotent(self, torrent: Dict, action_type: str, params: Dict) -> bool:
         """Check if action is idempotent and already applied"""
-        if action_type == 'pause':
+        if action_type == 'stop':
             return 'paused' in torrent.get('state', '').lower()
 
-        elif action_type == 'resume':
+        elif action_type == 'start':
             return 'paused' not in torrent.get('state', '').lower()
 
         elif action_type == 'set_category':
@@ -395,16 +395,16 @@ class ActionExecutor:
         """Execute the actual action"""
         torrent_hash = torrent['hash']
 
-        if action_type == 'pause':
-            success = self.api.pause_torrents([torrent_hash])
+        if action_type == 'stop':
+            success = self.api.stop_torrents([torrent_hash])
             if success:
-                logger.info(f"Paused {torrent['name']}")
+                logger.info(f"Stopped {torrent['name']}")
             return success
 
-        elif action_type == 'resume':
-            success = self.api.resume_torrents([torrent_hash])
+        elif action_type == 'start':
+            success = self.api.start_torrents([torrent_hash])
             if success:
-                logger.info(f"Resumed {torrent['name']}")
+                logger.info(f"Started {torrent['name']}")
             return success
 
         elif action_type == 'force_start':

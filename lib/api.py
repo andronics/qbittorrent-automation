@@ -234,16 +234,16 @@ class QBittorrentAPI:
 
     # Torrent Control Methods
 
-    def pause_torrents(self, hashes: List[str]) -> bool:
-        """Pause torrents (stop in v5.0+ API)"""
+    def stop_torrents(self, hashes: List[str]) -> bool:
+        """Stop torrents (pause in qBittorrent v5.0+)"""
         self._api_call(
             '/api/v2/torrents/stop',
             data={'hashes': '|'.join(hashes)}
         )
         return True
 
-    def resume_torrents(self, hashes: List[str]) -> bool:
-        """Resume torrents (start in v5.0+ API)"""
+    def start_torrents(self, hashes: List[str]) -> bool:
+        """Start torrents (resume in qBittorrent v5.0+)"""
         self._api_call(
             '/api/v2/torrents/start',
             data={'hashes': '|'.join(hashes)}

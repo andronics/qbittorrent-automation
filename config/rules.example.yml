@@ -21,8 +21,8 @@ rules:
           tags:
             - blocked-archive
             - auto-filtered
-      - type: pause
-      # Uncomment to auto-delete instead of pause:
+      - type: stop
+      # Uncomment to auto-delete instead of stop:
       # - type: delete_torrent
       #   params:
       #     keep_files: false
@@ -133,11 +133,11 @@ rules:
             - seedbox
             - long-term
     actions:
-      - type: pause
+      - type: stop
       - type: add_tag
         params:
           tags:
-            - auto-paused
+            - auto-stopped
             - seeded
 
   - name: Force start private tracker torrents under ratio
@@ -259,7 +259,7 @@ rules:
           operator: ==
           value: 0
     actions:
-      - type: pause
+      - type: stop
       - type: add_tag
         params:
           tags:
