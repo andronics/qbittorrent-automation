@@ -1,0 +1,339 @@
+# qBittorrent Automation - Rules Configuration
+#
+# Rules define conditions and actions to automate torrent management.
+# All field references use dot notation with API prefix: info.*, trackers.*, files.*, etc.
+#
+# For settings, see config.yml
+
+rules:
+  - name: Block unwanted archive files on add
+    enabled: true
+    stop_on_match: true  # Don't process other rules if matched
+    conditions:
+      trigger: on_added
+      any:
+        - field: files.name
+          operator: matches
+          value: '(?i)\.(rar|zip|7z|tar|gz|bz2|xz)$'
+    actions:
+      - type: add_tag
+        params:
+          tags:
+            - blocked-archive
+            - auto-filtered
+      - type: pause
+      # Uncomment to auto-delete instead of pause:
+      # - type: delete_torrent
+      #   params:
+      #     keep_files: false
+
+  - name: Tag private tracker torrents
+    enabled: true
+    stop_on_match: false
+    conditions:
+      all:
+        - field: trackers.url
+          operator: contains
+          value: .private
+    actions:
+      - type: add_tag
+        params:
+          tags:
+            - private
+
+  - name: Auto-categorize HD movies
+    enabled: true
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.name
+          operator: matches
+          value: (?i).*(1080p|2160p|4k).*
+        - field: info.category
+          operator: ==
+          value: ''
+    actions:
+      - type: set_category
+        params:
+          category: movies-hd
+      - type: add_tag
+        params:
+          tags:
+            - hd
+            - auto-categorized
+
+  - name: Auto-categorize TV shows
+    enabled: true
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.name
+          operator: matches
+          value: '(?i).*(s\d{2}e\d{2}|season).*'
+        - field: info.category
+          operator: ==
+          value: ''
+    actions:
+      - type: set_category
+        params:
+          category: tv
+
+  - name: Remove torrents with all dead trackers
+    enabled: true
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.added_on
+          operator: older_than
+          value: 14 days
+        - field: trackers.status
+          operator: in
+          value:
+            - 0
+            - 4
+    actions:
+      - type: delete_torrent
+        params:
+          keep_files: true
+
+  - name: Remove stalled magnet links
+    enabled: true
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.state
+          operator: ==
+          value: metaDL
+        - field: info.added_on
+          operator: older_than
+          value: 7 days
+    actions:
+      - type: delete_torrent
+        params:
+          keep_files: false
+
+  - name: Pause well-seeded torrents
+    enabled: true
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.ratio
+          operator: '>='
+          value: 2
+        - field: info.seeding_time
+          operator: '>'
+          value: 604800  # 168 hours in seconds
+        - field: info.num_leechs
+          operator: ==
+          value: 0
+      none:
+        - field: info.category
+          operator: in
+          value:
+            - seedbox
+            - long-term
+    actions:
+      - type: pause
+      - type: add_tag
+        params:
+          tags:
+            - auto-paused
+            - seeded
+
+  - name: Force start private tracker torrents under ratio
+    enabled: true
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.ratio
+          operator: <
+          value: 1
+        - field: info.state
+          operator: in
+          value:
+            - stalledUP
+            - queuedUP
+        - field: trackers.url
+          operator: contains
+          value: .private
+    actions:
+      - type: force_start
+      - type: add_tag
+        params:
+          tags:
+            - private-seeding
+
+  - name: Delete old completed torrents
+    enabled: true
+    stop_on_match: true
+    conditions:
+      all:
+        - field: info.completion_on
+          operator: older_than
+          value: 30 days
+        - field: info.ratio
+          operator: '>='
+          value: 1
+      none:
+        - field: info.category
+          operator: in
+          value:
+            - seedbox
+            - keep
+    actions:
+      - type: delete_torrent
+        params:
+          keep_files: false
+
+  - name: Emergency space cleanup
+    enabled: false
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.ratio
+          operator: '>='
+          value: 0.5
+        - field: info.completion_on
+          operator: older_than
+          value: 3 days
+    actions:
+      - type: delete_torrent
+        params:
+          keep_files: false
+
+  - name: Remove errored torrents
+    enabled: true
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.state
+          operator: ==
+          value: error
+    actions:
+      - type: delete_torrent
+        params:
+          keep_files: true
+
+  - name: Remove missing files torrents
+    enabled: true
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.state
+          operator: ==
+          value: missingFiles
+        - field: info.added_on
+          operator: older_than
+          value: 1 day
+    actions:
+      - type: delete_torrent
+        params:
+          keep_files: false
+
+  - name: Tag torrents from specific tracker
+    enabled: false
+    stop_on_match: false
+    conditions:
+      all:
+        - field: trackers.url
+          operator: matches
+          value: '^https://tracker\.example\.com.*'
+    actions:
+      - type: add_tag
+        params:
+          tags:
+            - tracker-example
+
+  - name: Pause torrents with no seeders
+    enabled: false
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.state
+          operator: ==
+          value: stalledDL
+        - field: info.added_on
+          operator: older_than
+          value: 3 days
+        - field: trackers.num_seeds
+          operator: ==
+          value: 0
+    actions:
+      - type: pause
+      - type: add_tag
+        params:
+          tags:
+            - no-seeds
+
+  - name: Limit upload speed for old torrents
+    enabled: false
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.ratio
+          operator: '>='
+          value: 5
+        - field: info.seeding_time
+          operator: '>'
+          value: 2592000  # 720 hours in seconds
+    actions:
+      - type: set_upload_limit
+        params:
+          limit: 102400
+
+  - name: Tag torrents when encryption is required
+    enabled: false
+    stop_on_match: false
+    conditions:
+      trigger: on_added
+      all:
+        - field: app.encryption
+          operator: ==
+          value: 2  # 2 = require encrypted connections
+    actions:
+      - type: add_tag
+        params:
+          tags:
+            - encrypted-only
+
+  - name: Tag HD content from private trackers
+    enabled: false
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.name
+          operator: matches
+          value: (?i).*(1080p|2160p).*
+        - field: info.size
+          operator: '>'
+          value: 10737418240
+        - field: trackers.url
+          operator: contains
+          value: .private
+    actions:
+      - type: add_tag
+        params:
+          tags:
+            - hd
+            - private
+            - large
+      - type: set_category
+        params:
+          category: private-hd
+
+  - name: Recheck stalled downloads
+    enabled: false
+    stop_on_match: false
+    conditions:
+      all:
+        - field: info.state
+          operator: ==
+          value: stalledDL
+        - field: info.progress
+          operator: '>'
+          value: 0.9
+        - field: info.last_activity
+          operator: older_than
+          value: 12 hours
+    actions:
+      - type: recheck
