@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from lib.arguments import create_parser, process_args, handle_utility_args
 from lib.config import load_config
 from lib.api import QBittorrentAPI
-from lib.engine import QBittorrentEngine
+from lib.engine import RulesEngine
 from lib.errors import handle_errors
 from lib.logging import setup_logging
 
@@ -49,7 +49,7 @@ def main():
 
     # Initialize and run engine
     dry_run = config.is_dry_run()
-    engine = QBittorrentEngine(api, config, dry_run)
+    engine = RulesEngine(api, config, dry_run)
     engine.run(trigger='scheduled')
 
     sys.exit(0)

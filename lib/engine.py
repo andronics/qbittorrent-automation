@@ -483,7 +483,7 @@ class ActionExecutor:
             return False
 
 
-class QBittorrentEngine:
+class RulesEngine:
     """Main qBittorrent automation engine"""
 
     def __init__(self, api: QBittorrentAPI, config: 'Config', dry_run: bool = False):
