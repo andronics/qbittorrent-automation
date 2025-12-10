@@ -1,6 +1,6 @@
 """
 qBittorrent Web API client
-Complete implementation of qBittorrent Web API v2
+Complete implementation of qBittorrent Web API v2 (>= v5.0)
 """
 
 import requests
@@ -235,17 +235,17 @@ class QBittorrentAPI:
     # Torrent Control Methods
 
     def pause_torrents(self, hashes: List[str]) -> bool:
-        """Pause torrents"""
+        """Pause torrents (stop in v5.0+ API)"""
         self._api_call(
-            '/api/v2/torrents/pause',
+            '/api/v2/torrents/stop',
             data={'hashes': '|'.join(hashes)}
         )
         return True
 
     def resume_torrents(self, hashes: List[str]) -> bool:
-        """Resume torrents"""
+        """Resume torrents (start in v5.0+ API)"""
         self._api_call(
-            '/api/v2/torrents/resume',
+            '/api/v2/torrents/start',
             data={'hashes': '|'.join(hashes)}
         )
         return True
