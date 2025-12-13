@@ -1,0 +1,550 @@
+"""Comprehensive tests for RulesEngine class in engine.py."""
+
+import pytest
+from unittest.mock import Mock, patch, MagicMock
+from qbt_rules.engine import RulesEngine, RuleStats
+
+
+# ============================================================================
+# Initialization
+# ============================================================================
+
+class TestRulesEngineInit:
+    """Test initialization."""
+
+    def test_init_normal_mode(self, mock_api, mock_config):
+        """Initialize in normal mode."""
+        engine = RulesEngine(mock_api, mock_config, dry_run=False)
+
+        assert engine.api == mock_api
+        assert engine.config == mock_config
+        assert engine.dry_run is False
+        assert engine.evaluator is not None
+        assert engine.executor is not None
+
+    def test_init_dry_run_mode(self, mock_api, mock_config):
+        """Initialize in dry run mode."""
+        engine = RulesEngine(mock_api, mock_config, dry_run=True)
+
+        assert engine.dry_run is True
+        assert engine.executor.dry_run is True
+
+    def test_init_stats(self, mock_api, mock_config):
+        """Stats start at zero."""
+        engine = RulesEngine(mock_api, mock_config)
+
+        assert engine.stats.total_torrents == 0
+        assert engine.stats.processed == 0
+        assert engine.stats.rules_matched == 0
+
+
+# ============================================================================
+# Basic Execution
+# ============================================================================
+
+class TestBasicExecution:
+    """Test basic rule execution."""
+
+    def test_run_with_no_torrents(self, mock_api, mock_config):
+        """Run with no torrents."""
+        mock_config.get_rules = Mock(return_value=[])
+        mock_api.torrents_data = {}
+        engine = RulesEngine(mock_api, mock_config)
+
+        engine.run(trigger='manual')
+
+        assert engine.stats.total_torrents == 0
+
+    def test_run_with_single_torrent(self, mock_api, mock_config, sample_torrent, simple_rule):
+        """Run with single torrent."""
+        mock_config.get_rules = Mock(return_value=[simple_rule])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        assert engine.stats.total_torrents == 1
+
+    def test_run_with_multiple_torrents(self, mock_api, mock_config, sample_torrent, downloading_torrent, simple_rule):
+        """Run with multiple torrents."""
+        mock_config.get_rules = Mock(return_value=[simple_rule])
+        mock_api.torrents_data = {
+            sample_torrent['hash']: sample_torrent,
+            downloading_torrent['hash']: downloading_torrent,
+        }
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        assert engine.stats.total_torrents == 2
+
+    def test_run_with_no_rules(self, mock_api, mock_config, sample_torrent):
+        """Run with torrents but no rules."""
+        mock_config.get_rules = Mock(return_value=[])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        assert engine.stats.total_torrents == 1
+        assert engine.stats.rules_matched == 0
+
+    def test_run_disabled_rule_skipped(self, mock_api, mock_config, sample_torrent):
+        """Disabled rules are skipped."""
+        disabled_rule = {
+            'name': 'Disabled rule',
+            'enabled': False,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 0}]},
+            'actions': [{'type': 'stop'}]
+        }
+        mock_config.get_rules = Mock(return_value=[disabled_rule])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        assert engine.stats.rules_matched == 0
+
+
+# ============================================================================
+# Rule Matching
+# ============================================================================
+
+class TestRuleMatching:
+    """Test rule matching behavior."""
+
+    def test_matching_rule_executes_actions(self, mock_api, mock_config, sample_torrent):
+        """Matching rule executes actions."""
+        rule = {
+            'name': 'Test rule',
+            'enabled': True,
+            'conditions': {
+                'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]
+            },
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['test']}}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        assert engine.stats.rules_matched == 1
+        assert engine.stats.actions_executed >= 1
+
+    def test_non_matching_rule_skips_actions(self, mock_api, mock_config, sample_torrent):
+        """Non-matching rule doesn't execute actions."""
+        rule = {
+            'name': 'Test rule',
+            'enabled': True,
+            'conditions': {
+                'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 10.0}]  # Won't match
+            },
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['test']}}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        assert engine.stats.rules_matched == 0
+        assert engine.stats.actions_executed == 0
+
+    def test_multiple_rules_all_evaluated(self, mock_api, mock_config, sample_torrent):
+        """Multiple rules are all evaluated in order."""
+        rule1 = {
+            'name': 'Rule 1',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag1']}}]
+        }
+        rule2 = {
+            'name': 'Rule 2',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.state', 'operator': '==', 'value': 'uploading'}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag2']}}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule1, rule2])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        # Both rules should match
+        assert engine.stats.rules_matched == 2
+
+    def test_multiple_torrents_each_evaluated(self, mock_api, mock_config, sample_torrent, downloading_torrent):
+        """Each torrent is evaluated against rules."""
+        rule = {
+            'name': 'Test rule',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['test']}}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule])
+        mock_api.torrents_data = {
+            sample_torrent['hash']: sample_torrent,  # ratio 2.0 - matches
+            downloading_torrent['hash']: downloading_torrent,  # ratio 0.0 - doesn't match
+        }
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        # Only one should match
+        assert engine.stats.rules_matched == 1
+
+    def test_same_torrent_matches_multiple_rules(self, mock_api, mock_config, sample_torrent):
+        """Same torrent can match multiple rules."""
+        rule1 = {
+            'name': 'Rule 1',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag1']}}]
+        }
+        rule2 = {
+            'name': 'Rule 2',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 2.0}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag2']}}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule1, rule2])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        # Both rules match same torrent
+        assert engine.stats.rules_matched == 2
+
+
+# ============================================================================
+# stop_on_match Behavior
+# ============================================================================
+
+class TestStopOnMatch:
+    """Test stop_on_match behavior."""
+
+    def test_stop_on_match_prevents_later_rules(self, mock_api, mock_config, sample_torrent):
+        """stop_on_match prevents later rules from processing torrent."""
+        rule1 = {
+            'name': 'Rule 1',
+            'enabled': True,
+            'stop_on_match': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag1']}}]
+        }
+        rule2 = {
+            'name': 'Rule 2',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag2']}}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule1, rule2])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        # Only first rule should match
+        assert engine.stats.rules_matched == 1
+        assert engine.stats.processed == 1
+
+    def test_stop_on_match_false_allows_later_rules(self, mock_api, mock_config, sample_torrent):
+        """stop_on_match=False allows later rules."""
+        rule1 = {
+            'name': 'Rule 1',
+            'enabled': True,
+            'stop_on_match': False,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag1']}}]
+        }
+        rule2 = {
+            'name': 'Rule 2',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag2']}}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule1, rule2])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        # Both rules should match
+        assert engine.stats.rules_matched == 2
+
+    def test_stop_on_match_only_affects_matching_torrent(self, mock_api, mock_config, sample_torrent, downloading_torrent):
+        """stop_on_match only affects the torrent that matched."""
+        rule1 = {
+            'name': 'Rule 1',
+            'enabled': True,
+            'stop_on_match': True,
+            'conditions': {'all': [{'field': 'info.state', 'operator': '==', 'value': 'uploading'}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag1']}}]
+        }
+        rule2 = {
+            'name': 'Rule 2',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.state', 'operator': '==', 'value': 'downloading'}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag2']}}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule1, rule2])
+        mock_api.torrents_data = {
+            sample_torrent['hash']: sample_torrent,  # uploading - matches rule1
+            downloading_torrent['hash']: downloading_torrent,  # downloading - matches rule2
+        }
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        # Both rules should match different torrents
+        assert engine.stats.rules_matched == 2
+
+    def test_stop_on_match_non_matching_rule(self, mock_api, mock_config, sample_torrent):
+        """stop_on_match on non-matching rule doesn't affect torrent."""
+        rule1 = {
+            'name': 'Rule 1',
+            'enabled': True,
+            'stop_on_match': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 10.0}]},  # Won't match
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag1']}}]
+        }
+        rule2 = {
+            'name': 'Rule 2',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},  # Will match
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['tag2']}}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule1, rule2])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        # Only rule2 should match
+        assert engine.stats.rules_matched == 1
+
+
+# ============================================================================
+# Single Torrent Mode
+# ============================================================================
+
+class TestSingleTorrentMode:
+    """Test single torrent mode (webhook)."""
+
+    def test_run_with_torrent_hash(self, mock_api, mock_config, sample_torrent, downloading_torrent, simple_rule):
+        """Run with specific torrent hash."""
+        mock_config.get_rules = Mock(return_value=[simple_rule])
+        mock_api.torrents_data = {
+            sample_torrent['hash']: sample_torrent,
+            downloading_torrent['hash']: downloading_torrent,
+        }
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='on_added', torrent_hash=sample_torrent['hash'])
+
+        # Should only process the one torrent
+        assert engine.stats.total_torrents == 1
+
+    def test_run_with_nonexistent_hash(self, mock_api, mock_config, sample_torrent, simple_rule):
+        """Run with non-existent torrent hash."""
+        mock_config.get_rules = Mock(return_value=[simple_rule])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='on_added', torrent_hash='nonexistent')
+
+        # Should find no torrents
+        assert engine.stats.total_torrents == 0
+
+    def test_single_torrent_mode_evaluates_rules(self, mock_api, mock_config, sample_torrent):
+        """Single torrent mode still evaluates all rules."""
+        rule = {
+            'name': 'Test rule',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['test']}}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='on_completed', torrent_hash=sample_torrent['hash'])
+
+        assert engine.stats.rules_matched == 1
+
+
+# ============================================================================
+# Statistics Tracking
+# ============================================================================
+
+class TestStatisticsTracking:
+    """Test statistics tracking."""
+
+    def test_stats_actions_executed(self, mock_api, mock_config, sample_torrent):
+        """Track actions executed."""
+        rule = {
+            'name': 'Test rule',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+            'actions': [
+                {'type': 'add_tag', 'params': {'tags': ['tag1']}},
+                {'type': 'add_tag', 'params': {'tags': ['tag2']}},
+            ]
+        }
+        mock_config.get_rules = Mock(return_value=[rule])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        assert engine.stats.actions_executed == 2
+
+    def test_stats_actions_skipped_idempotency(self, mock_api, mock_config):
+        """Track actions skipped due to idempotency."""
+        rule = {
+            'name': 'Test rule',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.state', 'operator': '==', 'value': 'pausedDL'}]},
+            'actions': [{'type': 'stop'}]  # Already paused
+        }
+        torrent = {'hash': 'test', 'name': 'Test', 'state': 'pausedDL', 'ratio': 1.0}
+        mock_config.get_rules = Mock(return_value=[rule])
+        mock_api.torrents_data = {torrent['hash']: torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        assert engine.stats.actions_skipped == 1
+        assert engine.stats.actions_executed == 0
+
+    def test_stats_errors_tracked(self, mock_api, mock_config, sample_torrent):
+        """Track action errors."""
+        rule = {
+            'name': 'Test rule',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+            'actions': [{'type': 'unknown_action'}]  # Will fail
+        }
+        mock_config.get_rules = Mock(return_value=[rule])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        assert engine.stats.errors == 1
+
+    def test_stats_processed_count(self, mock_api, mock_config, sample_torrent, downloading_torrent):
+        """Track processed count with stop_on_match."""
+        rule = {
+            'name': 'Test rule',
+            'enabled': True,
+            'stop_on_match': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 0}]},  # Matches all
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['test']}}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule])
+        mock_api.torrents_data = {
+            sample_torrent['hash']: sample_torrent,
+            downloading_torrent['hash']: downloading_torrent,
+        }
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        assert engine.stats.processed == 2
+
+
+# ============================================================================
+# Error Handling
+# ============================================================================
+
+class TestErrorHandling:
+    """Test error handling."""
+
+    def test_fatal_error_during_execution(self, mock_api, mock_config):
+        """Fatal errors are caught and raised."""
+        mock_config.get_rules = Mock(side_effect=Exception("Fatal error"))
+
+        engine = RulesEngine(mock_api, mock_config)
+
+        with pytest.raises(Exception) as exc_info:
+            engine.run(trigger='manual')
+
+        assert "Fatal error" in str(exc_info.value)
+
+    def test_summary_printed_even_on_error(self, mock_api, mock_config):
+        """Summary is printed even if error occurs."""
+        mock_config.get_rules = Mock(side_effect=Exception("Fatal error"))
+
+        engine = RulesEngine(mock_api, mock_config)
+
+        with pytest.raises(Exception):
+            with patch('qbt_rules.engine.logger.info') as mock_log:
+                engine.run(trigger='manual')
+
+                # Summary should still be logged
+                summary_calls = [call for call in mock_log.call_args_list if 'Summary' in str(call)]
+                assert len(summary_calls) > 0
+
+
+# ============================================================================
+# Integration Tests
+# ============================================================================
+
+class TestRulesEngineIntegration:
+    """Integration tests for complete workflows."""
+
+    def test_complete_workflow_multiple_rules_torrents(self, mock_api, mock_config):
+        """Complete workflow with multiple rules and torrents."""
+        rule1 = {
+            'name': 'High ratio torrents',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 2.0}]},
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['high-ratio']}}]
+        }
+        rule2 = {
+            'name': 'Downloading torrents',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.state', 'operator': '==', 'value': 'downloading'}]},
+            'actions': [{'type': 'set_category', 'params': {'category': 'active'}}]
+        }
+
+        torrent1 = {'hash': 'h1', 'name': 'T1', 'ratio': 3.0, 'state': 'uploading', 'tags': '', 'category': ''}
+        torrent2 = {'hash': 'h2', 'name': 'T2', 'ratio': 0.5, 'state': 'downloading', 'tags': '', 'category': ''}
+        torrent3 = {'hash': 'h3', 'name': 'T3', 'ratio': 2.5, 'state': 'uploading', 'tags': '', 'category': ''}
+
+        mock_config.get_rules = Mock(return_value=[rule1, rule2])
+        mock_api.torrents_data = {
+            torrent1['hash']: torrent1,
+            torrent2['hash']: torrent2,
+            torrent3['hash']: torrent3,
+        }
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(trigger='manual')
+
+        # Verify execution
+        assert engine.stats.total_torrents == 3
+        assert engine.stats.rules_matched == 3  # T1->rule1, T2->rule2, T3->rule1
+        assert engine.stats.actions_executed >= 3
+
+    def test_dry_run_mode_integration(self, mock_api, mock_config, sample_torrent):
+        """Dry run mode doesn't execute actions."""
+        rule = {
+            'name': 'Test rule',
+            'enabled': True,
+            'conditions': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+            'actions': [{'type': 'stop'}]
+        }
+        mock_config.get_rules = Mock(return_value=[rule])
+        mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
+
+        engine = RulesEngine(mock_api, mock_config, dry_run=True)
+        engine.run(trigger='manual')
+
+        # Should match but not execute
+        assert engine.stats.rules_matched == 1
+        assert engine.stats.actions_executed == 0  # Dry run doesn't execute
+        assert mock_api.calls['stop'] == []  # No API calls made
