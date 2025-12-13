@@ -61,27 +61,27 @@ def test_is_newer_than_false():
 
 def test_is_larger_than_true():
     """Test is_larger_than returns True for larger size."""
-    size = 2048**3  # 2 GB
-    result = is_larger_than(size, 1024**3) # larger than 1 GB
+    size = 2 * 1024**3  # 2 GB in bytes
+    result = is_larger_than(size, "1 GB")  # larger than 1 GB
     assert result is True
-    
+
 
 def test_is_larger_than_false():
     """Test is_larger_than returns False for smaller size."""
-    size = 1024**2  # 1 MB
-    result = is_larger_than(size, 1024**3) # larger than 1 GB
+    size = 1024**2  # 1 MB in bytes
+    result = is_larger_than(size, "1 GB")  # NOT larger than 1 GB
     assert result is False
 
 
 def test_is_smaller_than_true():
-    """Test is_smaller_than returns True for smaler size."""
-    size = 1024**2  # 1 MB
-    result = is_smaller_than(size, 1024**3) # smaler than 1 GB
+    """Test is_smaller_than returns True for smaller size."""
+    size = 1024**2  # 1 MB in bytes
+    result = is_smaller_than(size, "1 GB")  # smaller than 1 GB
     assert result is True
-    
+
 
 def test_is_smaller_than_false():
-    """Test is_smaller_than returns False for smaller size."""
-    size = 2048**3  # 2 GB
-    result = is_smaller_than(size, 1024**3) # smaler than 1 GB
+    """Test is_smaller_than returns False for larger size."""
+    size = 2 * 1024**3  # 2 GB in bytes
+    result = is_smaller_than(size, "1 GB")  # NOT smaller than 1 GB
     assert result is False

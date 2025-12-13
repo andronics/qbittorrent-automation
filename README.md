@@ -15,7 +15,7 @@ qbt-rules is a Python-based rules engine that automates torrent management throu
 
 - **Declarative YAML Rules** - No coding required, just write rules
 - **Multiple Trigger Types** - Manual, scheduled (cron), webhooks (on_added, on_completed)
-- **Powerful Conditions** - Complex logic with AND/OR/NOT groups, 15+ operators
+- **Powerful Conditions** - Complex logic with AND/OR/NOT groups, 17+ operators
 - **Rich Field Access** - Dot notation access to all torrent metadata (info.*, trackers.*, files.*, etc.)
 - **Idempotent Actions** - Safe to run repeatedly, actions skip if already applied
 - **Dry-Run Mode** - Test rules without making changes
@@ -178,7 +178,7 @@ Combine conditions with logical groups:
 
 **Available Operators:**
 
-`==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `not_contains`, `matches`, `in`, `not_in`, `older_than`, `newer_than`
+`==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `not_contains`, `matches`, `in`, `not_in`, `older_than`, `newer_than`, `smaller_than`, `larger_than`
 
 **[📖 Detailed Condition Documentation](https://github.com/andronics/qbt-rules/wiki/Conditions)**
 
@@ -275,6 +275,27 @@ Execute one or more actions when conditions match:
         value: ["pausedUP", "stalledUP"]
   actions:
     - type: force_start
+```
+
+### Pause Large Downloads
+
+```yaml
+- name: "Pause very large downloads"
+  enabled: true
+  conditions:
+    trigger: on_added
+    all:
+      - field: info.size
+        operator: larger_than
+        value: "50 GB"
+      - field: info.state
+        operator: in
+        value: ["downloading", "metaDL"]
+  actions:
+    - type: stop
+    - type: add_tag
+      params:
+        tag: "large-download"
 ```
 
 **[📖 More Examples](https://github.com/andronics/qbt-rules/wiki/Examples)**
