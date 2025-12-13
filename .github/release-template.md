@@ -47,4 +47,4 @@ Use this template when creating manual releases or updating release notes.
 ---
 
 ## Full Changelog
-**Full Changelog**: https://github.com/YOUR_USERNAME/qbittorrent-automation/compare/vX.Y.Z-1...vX.Y.Z
+**Full Changelog**: https://github.com/andronics/qbt-rules/compare/vX.Y.Z-1...vX.Y.Z
