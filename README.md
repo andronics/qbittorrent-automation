@@ -96,17 +96,20 @@ rules:
 # Test with dry-run (shows what would happen)
 qbt-rules --dry-run
 
-# Apply rules (defaults to manual trigger)
+# Run rules WITHOUT a trigger filter (default behavior)
 qbt-rules
 
 # Enable trace logging for debugging
 qbt-rules --trace
 
-# Run with specific trigger
+# Run rules WITH a specific trigger
 qbt-rules --trigger scheduled
 
-# Process specific torrent
-qbt-rules --trigger on_completed --torrent-hash abc123...
+# Process specific torrent with trigger
+qbt-rules --trigger on_completed --hash abc123...
+
+# Run ALL rules (ignore trigger filters)
+qbt-rules --trigger none
 ```
 
 **Using Python module:**
@@ -159,39 +162,61 @@ python -m qbt_rules.cli --dry-run
 
 ### Triggers
 
-Rules can be filtered by trigger type, allowing different rules to run in different contexts.
+Triggers are rule filters that control when rules execute. Rules specify a `trigger` condition, and you use the `--trigger` flag to run matching rules.
 
-**Built-in Triggers:**
-
-| Trigger | Description | Use Case |
-|---------|-------------|----------|
-| **manual** | Run on-demand via CLI (default) | Testing, one-time bulk operations |
-| **scheduled** | Run by cron/systemd timer | Regular cleanup, maintenance |
-| **on_added** | Webhook when torrent added | Auto-categorize new downloads |
-| **on_completed** | Webhook when download completes | Post-processing, seeding rules |
-
-**Custom Triggers:**
-
-You can define your own trigger names for flexible scheduling:
+**How Trigger Filtering Works:**
 
 ```bash
-# Run rules with trigger: hourly
-qbt-rules --trigger hourly
+# No --trigger flag: Runs ONLY rules WITHOUT a trigger condition
+qbt-rules
 
-# Run rules with trigger: nightly_cleanup
-qbt-rules --trigger nightly_cleanup
+# --trigger <name>: Runs ONLY rules WITH that trigger name
+qbt-rules --trigger scheduled
+qbt-rules --trigger on_added --hash abc123
 
-# Run rules with trigger: weekend
-qbt-rules --trigger weekend
+# --trigger none: Runs ALL rules (ignores trigger filters)
+qbt-rules --trigger none
 ```
 
-**Trigger-Agnostic Mode:**
+**There are no built-in triggers** - all trigger names are arbitrary. You define them in your rules and specify them at runtime.
 
-Run all rules regardless of their trigger filters:
+**Common Trigger Naming Conventions:**
 
-```bash
-# Ignore all trigger filters and run every rule
-qbt-rules --trigger none
+| Trigger Name | Typical Use Case | Example Schedule |
+|--------------|------------------|------------------|
+| **scheduled** | Periodic maintenance | Cron/systemd hourly/daily |
+| **on_added** | qBittorrent webhook | When torrent added |
+| **on_completed** | qBittorrent webhook | When download completes |
+| **hourly** | Frequent checks | Every hour |
+| **nightly** | Daily cleanup | 3 AM daily |
+| **weekly** | Weekly tasks | Sunday midnight |
+
+**Example Rules:**
+
+```yaml
+# This rule runs when: qbt-rules --trigger scheduled
+- name: "Cleanup old torrents"
+  conditions:
+    trigger: scheduled  # Only runs with --trigger scheduled
+    all:
+      - field: info.completion_on
+        operator: older_than
+        value: "30 days"
+  actions:
+    - type: delete_torrent
+
+# This rule runs when: qbt-rules (no --trigger flag)
+- name: "Always check large downloads"
+  conditions:
+    # No trigger specified - runs by default
+    all:
+      - field: info.size
+        operator: larger_than
+        value: "50GB"
+  actions:
+    - type: add_tag
+      params:
+        tag: "large"
 ```
 
 **[📖 Detailed Trigger Documentation](https://github.com/andronics/qbt-rules/wiki/Triggers)**
