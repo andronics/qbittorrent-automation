@@ -51,12 +51,12 @@ jobs:
       - name: Lint with ruff
         continue-on-error: true
         run: |
-          ruff check src/ triggers/ || echo "Linting issues found (non-blocking)"
+          ruff check src/ || echo "Linting issues found (non-blocking)"
 
       - name: Check code formatting
         continue-on-error: true
         run: |
-          black --check src/ triggers/ || echo "Formatting issues found (non-blocking)"
+          black --check src/ || echo "Formatting issues found (non-blocking)"
 
       - name: Type check with mypy
         continue-on-error: true
@@ -71,12 +71,12 @@ jobs:
       - name: Check for common issues
         run: |
           # Check for print statements (should use logger)
-          if grep -r "print(" src/ triggers/ --include="*.py" | grep -v "# print OK" | grep -v "__pycache__"; then
+          if grep -r "print(" src/ --include="*.py" | grep -v "# print OK" | grep -v "__pycache__"; then
             echo "Warning: Found print() statements. Consider using logger instead."
           fi
 
           # Check for hardcoded credentials
-          if grep -rE "(password|token|secret|key)\s*=\s*['\"][^'\"]{8,}" src/ triggers/ --include="*.py" | grep -v "password ="; then
+          if grep -rE "(password|token|secret|key)\s*=\s*['\"][^'\"]{8,}" src/ --include="*.py" | grep -v "password ="; then
             echo "Warning: Potential hardcoded credentials found!"
             exit 1
           fi
