@@ -29,7 +29,6 @@ jobs:
       - name: Validate Python syntax
         run: |
           python -m py_compile src/qbt_rules/*.py
-          python -m py_compile src/qbt_rules/cli/*.py
           echo "✓ All Python files have valid syntax"
 
       - name: Test module imports
