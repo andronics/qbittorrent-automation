@@ -9,7 +9,7 @@ from typing import Dict, List, Any, Optional, Tuple
 
 from qbt_rules.api import QBittorrentAPI
 from qbt_rules.utils import parse_tags, is_older_than, is_newer_than, is_larger_than, is_smaller_than
-from qbt_rules.errors import FieldError, OperatorError, RuleValidationError
+from qbt_rules.errors import FieldError, OperatorError
 from qbt_rules.logging import get_logger
 
 logger = get_logger(__name__)
