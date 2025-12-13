@@ -159,12 +159,40 @@ python -m qbt_rules.cli --dry-run
 
 ### Triggers
 
+Rules can be filtered by trigger type, allowing different rules to run in different contexts.
+
+**Built-in Triggers:**
+
 | Trigger | Description | Use Case |
 |---------|-------------|----------|
-| **manual** | Run on-demand via CLI | Testing, one-time bulk operations |
+| **manual** | Run on-demand via CLI (default) | Testing, one-time bulk operations |
 | **scheduled** | Run by cron/systemd timer | Regular cleanup, maintenance |
 | **on_added** | Webhook when torrent added | Auto-categorize new downloads |
 | **on_completed** | Webhook when download completes | Post-processing, seeding rules |
+
+**Custom Triggers:**
+
+You can define your own trigger names for flexible scheduling:
+
+```bash
+# Run rules with trigger: hourly
+qbt-rules --trigger hourly
+
+# Run rules with trigger: nightly_cleanup
+qbt-rules --trigger nightly_cleanup
+
+# Run rules with trigger: weekend
+qbt-rules --trigger weekend
+```
+
+**Trigger-Agnostic Mode:**
+
+Run all rules regardless of their trigger filters:
+
+```bash
+# Ignore all trigger filters and run every rule
+qbt-rules --trigger none
+```
 
 **[📖 Detailed Trigger Documentation](https://github.com/andronics/qbt-rules/wiki/Triggers)**
 
@@ -249,7 +277,7 @@ Execute one or more actions when conditions match:
         value: ["uploading", "pausedUP", "stalledUP"]
       - field: info.completion_on
         operator: older_than
-        value: 2592000  # 30 days
+        value: "30 days"  # Human-readable duration
       - field: info.ratio
         operator: ">="
         value: 2.0
@@ -319,6 +347,8 @@ Execute one or more actions when conditions match:
 
 ### Systemd Timer
 
+**Option 1: Single Timer (Simple)**
+
 Create `/etc/systemd/system/qbt-rules.service`:
 
 ```ini
@@ -351,6 +381,84 @@ Enable:
 ```bash
 sudo systemctl enable qbt-rules.timer
 sudo systemctl start qbt-rules.timer
+```
+
+**Option 2: Template Service (Multiple Triggers)**
+
+For running different triggers on different schedules, use systemd templates.
+
+Create `/etc/systemd/system/qbt-rules@.service`:
+
+```ini
+[Unit]
+Description=qbt-rules - %i trigger
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/qbt-rules --trigger %i
+User=qbittorrent
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+```
+
+Create multiple timer files for different triggers:
+
+`/etc/systemd/system/qbt-rules@hourly.timer`:
+```ini
+[Unit]
+Description=Run qbt-rules hourly trigger
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+`/etc/systemd/system/qbt-rules@nightly.timer`:
+```ini
+[Unit]
+Description=Run qbt-rules nightly trigger
+
+[Timer]
+OnCalendar=daily
+OnCalendar=03:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+`/etc/systemd/system/qbt-rules@weekly.timer`:
+```ini
+[Unit]
+Description=Run qbt-rules weekly trigger
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable the timers you need:
+```bash
+# Enable hourly trigger
+sudo systemctl enable qbt-rules@hourly.timer
+sudo systemctl start qbt-rules@hourly.timer
+
+# Enable nightly trigger
+sudo systemctl enable qbt-rules@nightly.timer
+sudo systemctl start qbt-rules@nightly.timer
+
+# Enable weekly trigger
+sudo systemctl enable qbt-rules@weekly.timer
+sudo systemctl start qbt-rules@weekly.timer
+
+# Check timer status
+sudo systemctl list-timers qbt-rules@*
 ```
 
 ### Docker
