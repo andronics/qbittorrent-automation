@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qbt-rules"
-version = "0.3.0"
+version = "0.3.1"
 description = "A powerful Python-based rules engine for qBittorrent automation"
 readme = "README.md"
 authors = [

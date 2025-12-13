@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2025-12-13
+
+### Added
+- Comprehensive test coverage for `api.py` module (0% → 100% coverage)
+- Comprehensive test coverage for `arguments.py` module (100% coverage)
+- Comprehensive test coverage for `config.py` module (100% coverage)
+- Additional test coverage for `engine.py` edge cases and nested conditions
+- Documentation for human-readable size operators (`larger_than`, `smaller_than`)
+
+### Changed
+- Simplified CLI structure by moving `cli/main.py` to `cli.py` (internal refactoring)
+
+### Fixed
+- Removed unreachable dead code from `engine.py` (line 341)
+- CI validation workflow to reflect new CLI structure (removed deprecated cli folder path check)
+
 ## [0.3.0] - 2024-12-13
 
 ### Changed
@@ -187,7 +203,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Action 'pause' → 'stop'
 - Action 'resume' → 'start'
 
-[Unreleased]: https://github.com/andronics/qbt-rules/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/andronics/qbt-rules/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/andronics/qbt-rules/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/andronics/qbt-rules/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/andronics/qbt-rules/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/andronics/qbt-rules/compare/v0.0.1...v0.1.0
