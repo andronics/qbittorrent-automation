@@ -143,11 +143,20 @@ class ConditionEvaluator:
 
         Args:
             torrent: Torrent dictionary
-            condition: Condition dictionary with field, operator, value
+            condition: Condition dictionary with field, operator, value OR nested logical operator
 
         Returns:
             True if condition matches
         """
+        # Handle nested logical operators
+        if 'all' in condition:
+            return self._evaluate_all(torrent, condition['all'])
+        if 'any' in condition:
+            return self._evaluate_any(torrent, condition['any'])
+        if 'none' in condition:
+            return self._evaluate_none(torrent, condition['none'])
+
+        # Handle regular field conditions
         field = condition['field']
         operator = condition['operator']
         value = condition['value']
@@ -329,8 +338,6 @@ class ConditionEvaluator:
         else:
             raise OperatorError(operator, field)
 
-        return False
-
 
 class ActionExecutor:
     """Executes actions on torrents with idempotency checks"""
@@ -367,7 +374,7 @@ class ActionExecutor:
                 return True, True
             if self.dry_run:
                 self._log_dry_run(torrent, action_type, params)
-                return True, False
+                return True, True  # Dry run actions count as "skipped" (not actually executed)
             # Execute action
             return self._execute_action(torrent, action_type, params), False
 
