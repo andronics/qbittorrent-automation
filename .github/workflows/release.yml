@@ -35,9 +35,10 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
           fi
 
-          # Validate semver format
-          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
-            echo "Error: Tag must follow semantic versioning (v1.2.3 or v1.2.3-beta.1)"
+          # Validate PEP 440 compatible version format
+          # Supports: v1.2.3, v1.2.3a1, v1.2.3b2, v1.2.3rc1, v1.2.3.post1, v1.2.3.dev0
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(a[0-9]+|b[0-9]+|rc[0-9]+)?(\.post[0-9]+)?(\.dev[0-9]+)?$'; then
+            echo "Error: Tag must follow PEP 440 versioning (v1.2.3, v1.2.3rc1, v1.2.3a1, etc.)"
             exit 1
           fi
 
@@ -150,7 +151,7 @@ jobs:
           files: |
             qbt-rules-v${{ steps.version.outputs.version }}.zip
           draft: false
-          prerelease: ${{ contains(steps.version.outputs.tag, '-') }}
+          prerelease: ${{ contains(steps.version.outputs.tag, 'a') || contains(steps.version.outputs.tag, 'b') || contains(steps.version.outputs.tag, 'rc') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
