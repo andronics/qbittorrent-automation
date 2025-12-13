@@ -24,19 +24,38 @@ def smart_config_default() -> str:
     return '/config'
 
 
-def create_base_parser(description: str) -> argparse.ArgumentParser:
+def create_parser() -> argparse.ArgumentParser:
     """
-    Create base argument parser with common arguments
+    Create argument parser for qbt-rules CLI
 
     Args:
         description: Description for the parser
+        trigger_type: Legacy parameter for backward compatibility (default: None)
 
     Returns:
-        ArgumentParser with common arguments added
+        Configured ArgumentParser
     """
+    
     parser = argparse.ArgumentParser(
-        description=f'qBittorrent Automation - {description}',
+        description=f'qbt-rules - rules engine',
         formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+
+    parser.add_argument(
+        '--trigger',
+        type=str,
+        default=None,
+        help='Trigger name (manual, scheduled, on_added, on_completed, or custom). Defaults to "manual" unless --torrent-hash is provided without --trigger.',
+        metavar="TRIGGER"
+    )
+
+    parser.add_argument(
+        '--torrent-hash',
+        type=str,
+        default=None,
+        dest='torrent_hash',
+        help='Torrent hash to process (40-character hex string). When provided without --trigger, runs only rules with no trigger condition.',
+        metavar="HASH"
     )
 
     # Common configuration arguments
@@ -44,7 +63,8 @@ def create_base_parser(description: str) -> argparse.ArgumentParser:
         '--config-dir',
         type=Path,
         default=None,
-        help=f'Path to configuration directory (default: {smart_config_default()} or CONFIG_DIR env var)'
+        help=f'Path to configuration directory (default: {smart_config_default()} or CONFIG_DIR env var)',
+        metavar="DIR"
     )
 
     parser.add_argument(
@@ -56,7 +76,8 @@ def create_base_parser(description: str) -> argparse.ArgumentParser:
     parser.add_argument(
         '--log-level',
         choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
-        help='Set logging verbosity (default: from config or INFO)'
+        help='Set logging verbosity (default: INFO)',
+        metavar="LEVEL"
     )
 
     parser.add_argument(
@@ -69,7 +90,7 @@ def create_base_parser(description: str) -> argparse.ArgumentParser:
     parser.add_argument(
         '--version',
         action='version',
-        version=f'qBittorrent Automation v{__version__}'
+        version=f'qbt-rules v{__version__}'
     )
 
     parser.add_argument(
@@ -84,76 +105,38 @@ def create_base_parser(description: str) -> argparse.ArgumentParser:
         help='List all rules with priorities and exit'
     )
 
-    return parser
 
+        
 
-def create_parser(description: str, trigger_type: str = 'manual') -> argparse.ArgumentParser:
-    """
-    Create argument parser for a specific trigger type
-
-    Args:
-        description: Description for this trigger
-        trigger_type: Type of trigger ('manual', 'scheduled', 'webhook')
-
-    Returns:
-        Configured ArgumentParser
-    """
-    parser = create_base_parser(description)
-
-    # Add trigger-specific arguments
-    if trigger_type == 'webhook':
-        parser.add_argument(
-            'torrent_hash',
-            nargs='?',  # Optional for backward compatibility with env-only usage
-            help='Torrent hash from qBittorrent webhook (40-character hex string)'
-        )
-
-    # Add trigger-specific epilog with examples
-    if trigger_type == 'manual':
-        parser.epilog = '''
+    parser.epilog = '''
 Examples:
-  # Run all rules
-  python triggers/manual.py
+
+  # Run with default manual trigger
+  qbt-rules
+
+  # Run with specific trigger
+  qbt-rules --trigger scheduled
+
+  # Use custom trigger name
+  qbt-rules --trigger my_custom_trigger
+
+  # Process specific torrent (trigger-agnostic mode - runs rules with no trigger condition)
+  qbt-rules --torrent-hash abc123def456...
+
+  # Process specific torrent with trigger
+  qbt-rules --trigger on_completed --torrent-hash abc123def456...
 
   # Run in dry-run mode
-  python triggers/manual.py --dry-run
+  qbt-rules --dry-run --trigger manual
 
-  # Use custom config directory
-  python triggers/manual.py --config-dir /path/to/config
-
-  # Enable trace mode for detailed logging
-  python triggers/manual.py --trace
-
-  # Validate configuration without running
-  python triggers/manual.py --validate
+  # Validate configuration
+  qbt-rules --validate
 
   # List all rules
-  python triggers/manual.py --list-rules
-        '''
-    elif trigger_type == 'scheduled':
-        parser.epilog = '''
-Examples:
-  # Run from cron (uses environment variables)
-  */15 * * * * cd /app && python3 triggers/scheduled.py
+  qbt-rules --list-rules
+    '''
 
-  # Test with dry-run override
-  python triggers/scheduled.py --dry-run
 
-  # Validate before deploying to cron
-  python triggers/scheduled.py --validate
-        '''
-    elif trigger_type == 'webhook':
-        parser.epilog = '''
-Examples:
-  # Called by qBittorrent webhook (automatic)
-  python triggers/on_added.py abc123def456...
-
-  # Test manually with specific torrent
-  python triggers/on_added.py --dry-run abc123def456...
-
-  # Validate webhook configuration
-  python triggers/on_added.py --validate
-        '''
 
     return parser
 
@@ -229,7 +212,7 @@ def handle_utility_args(args: argparse.Namespace, config) -> bool:
     Returns:
         True if a utility argument was handled (should exit), False otherwise
     """
-    from lib.logging import get_logger
+    from qbt_rules.logging import get_logger
     logger = get_logger(__name__)
 
     # Handle --validate

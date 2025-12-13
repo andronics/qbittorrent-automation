@@ -66,6 +66,153 @@ def parse_duration(duration: str) -> int:
     return amount * multipliers.get(unit, 0)
 
 
+def parse_size(size: str) -> int:
+    """
+    Parse human-readable size string (e.g., '5 Gb', '4KB', '1000b', '1.5 MiB')
+    into bytes. Supports fractional values and differentiates bits vs bytes.
+
+    Bits (b) → converted to bytes (divide by 8)
+    Bytes (B) → used directly
+
+    Examples:
+        >>> parse_size("5 Gb")       # gigabits
+        625000000
+        >>> parse_size("4KB")        # kilobytes
+        4000
+        >>> parse_size("2 MiB")      # mebibytes
+        2097152
+        >>> parse_size("1000b")      # bits
+        125
+        >>> parse_size("1.5 MB")
+        1500000
+    """
+    if not size:
+        return 0
+
+    s = size.strip()
+
+    # number + unit (unit may include suffixes like KiB, MB, Gb, etc.)
+    match = re.match(r'(\d+(?:\.\d+)?)\s*([A-Za-z]+)?', s)
+    if not match:
+        logging.warning(f"Invalid size format: {size}, defaulting to 0")
+        return 0
+
+    amount = float(match.group(1))
+    unit = match.group(2) or "B"  # default to bytes if no unit
+
+    # Normalize unit exactly as written (case matters for bit/byte)
+    unit = unit.strip()
+
+    # Define prefix multipliers
+    si_prefixes = {
+        "": 1,
+        "k": 10**3,
+        "M": 10**6,
+        "G": 10**9,
+        "T": 10**12,
+        "P": 10**15,
+    }
+
+    iec_prefixes = {
+        "Ki": 2**10,
+        "Mi": 2**20,
+        "Gi": 2**30,
+        "Ti": 2**40,
+        "Pi": 2**50,
+    }
+
+    # Extract prefix + type (bit or byte)
+    # Examples:
+    #   "MB"  -> prefix="M",  type="B"
+    #   "Gb"  -> prefix="G",  type="b"
+    #   "MiB" -> prefix="Mi", type="B"
+    prefix = None
+    unit_type = None  # 'b' or 'B'
+
+    # IEC (KiB, MiB…)
+    for pre in iec_prefixes:
+        if unit.startswith(pre):
+            prefix = pre
+            unit_type = unit[len(pre):]  # should be 'B' or 'b'
+            break
+
+    # SI (kB, MB…) — only if IEC not matched
+    if prefix is None:
+        # prefix = all except last char
+        prefix = unit[:-1]
+        unit_type = unit[-1]
+
+        # Fix lowercase SI prefixes like "kb", "mb" → canonical "k", "M"
+        prefix = {
+            "k": "k",
+            "K": "k",
+            "m": "M",
+            "M": "M",
+            "g": "G",
+            "G": "G",
+            "t": "T",
+            "T": "T",
+            "p": "P",
+            "P": "P",
+            "": "",
+        }.get(prefix, prefix)  # leave unexpected ones unchanged
+
+    # Determine multiplier
+    if prefix in iec_prefixes:
+        multiplier = iec_prefixes[prefix]
+    elif prefix in si_prefixes:
+        multiplier = si_prefixes[prefix]
+    else:
+        logging.warning(f"Unknown size prefix '{prefix}', defaulting to 1")
+        multiplier = 1
+
+    # Bits vs Bytes
+    if unit_type == "B":
+        # bytes — OK
+        value_bytes = amount * multiplier
+    elif unit_type == "b":
+        # bits — convert to bytes
+        value_bytes = (amount * multiplier) / 8
+    else:
+        logging.warning(f"Invalid unit type '{unit_type}', defaulting to bytes")
+        value_bytes = amount * multiplier
+
+    return int(value_bytes)
+
+def is_larger_than(size_bytes: int, human_size: str) -> bool:
+    """
+    Check if size_bytes is larger than a human-readable size.
+
+    Args:
+        size_bytes: Size in bytes (integer)
+        human_size: Human-readable size string like "5 MB", "3 Gb", "2 MiB"
+
+    Returns:
+        True if size_bytes is larger than the parsed human_size.
+    """
+    if size_bytes < 0:
+        return False
+
+    target_bytes = parse_size(human_size)
+    return size_bytes > target_bytes
+
+def is_smaller_than(size_bytes: int, human_size: str) -> bool:
+    """
+    Check if size_bytes is smaller than a human-readable size.
+
+    Args:
+        size_bytes: Size in bytes (integer)
+        human_size: Human-readable size string like "5 MB", "3 Gb", "2 MiB"
+
+    Returns:
+        True if size_bytes is smaller than the parsed human_size.
+    """
+    if size_bytes < 0:
+        return False
+
+    target_bytes = parse_size(human_size)
+    return size_bytes < target_bytes
+
 def is_older_than(timestamp: int, duration: str) -> bool:
     """
     Check if timestamp is older than duration

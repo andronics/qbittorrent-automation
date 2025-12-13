@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qbt-rules"
-version = "0.2.0"
+version = "0.3.0"
 description = "A powerful Python-based rules engine for qBittorrent automation"
 readme = "README.md"
 authors = [
@@ -51,10 +51,7 @@ Issues = "https://github.com/andronics/qbt-rules/issues"
 Changelog = "https://github.com/andronics/qbt-rules/blob/main/CHANGELOG.md"
 
 [project.scripts]
-qbt-manual = "qbt_rules.cli.manual:main"
-qbt-scheduled = "qbt_rules.cli.scheduled:main"
-qbt-on-added = "qbt_rules.cli.on_added:main"
-qbt-on-completed = "qbt_rules.cli.on_completed:main"
+qbt-rules = "qbt_rules.cli.main:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

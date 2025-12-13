@@ -90,29 +90,29 @@ rules:
 
 ### Run It
 
-**Using console scripts (after pip install):**
+**Using console script (after pip install):**
 
 ```bash
 # Test with dry-run (shows what would happen)
-qbt-manual --dry-run
+qbt-rules --dry-run
 
-# Apply rules
-qbt-manual
+# Apply rules (defaults to manual trigger)
+qbt-rules
 
 # Enable trace logging for debugging
-qbt-manual --trace
+qbt-rules --trace
+
+# Run with specific trigger
+qbt-rules --trigger scheduled
+
+# Process specific torrent
+qbt-rules --trigger on_completed --torrent-hash abc123...
 ```
 
 **Using Python module:**
 
 ```bash
-python -m qbt_rules.cli.manual --dry-run
-```
-
-**Legacy method (still works):**
-
-```bash
-python triggers/manual.py --dry-run
+python -m qbt_rules.cli.main --dry-run
 ```
 
 ---
@@ -285,24 +285,15 @@ Execute one or more actions when conditions match:
 
 ### Scheduled Execution with Cron
 
-**Using console script (after pip install):**
-
 ```bash
 # Run every hour
-0 * * * * qbt-scheduled
+0 * * * * qbt-rules --trigger scheduled
 
 # Run daily at 3 AM
-0 3 * * * qbt-scheduled
-```
+0 3 * * * qbt-rules --trigger scheduled
 
-**Using legacy method:**
-
-```bash
-# Run every hour
-0 * * * * cd /path/to/qbt-rules && python triggers/scheduled.py
-
-# Run daily at 3 AM
-0 3 * * * cd /path/to/qbt-rules && python triggers/scheduled.py
+# Custom trigger at midnight
+0 0 * * * qbt-rules --trigger nightly_cleanup
 ```
 
 ### Systemd Timer
@@ -316,7 +307,7 @@ After=network.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/qbt-scheduled
+ExecStart=/usr/local/bin/qbt-rules --trigger scheduled
 User=qbittorrent
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 ```
@@ -355,7 +346,7 @@ RUN pip install qbt-rules
 COPY config/ /app/config/
 
 # Run scheduled trigger every hour
-CMD ["sh", "-c", "while true; do qbt-scheduled; sleep 3600; done"]
+CMD ["sh", "-c", "while true; do qbt-rules --trigger scheduled; sleep 3600; done"]
 ```
 
 **[📖 Deployment Guide](https://github.com/andronics/qbt-rules/wiki/Deployment)**
@@ -398,7 +389,7 @@ Contributions are welcome! Please see the [Contributing Guide](https://github.co
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 
-**Latest Release:** [v0.2.0](https://github.com/andronics/qbt-rules/releases/tag/v0.2.0) - 2024-12-10
+**Latest Release:** [v0.3.0](https://github.com/andronics/qbt-rules/releases/tag/v0.3.0) - 2024-12-13
 
 ---
 

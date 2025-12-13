@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Any, Optional, Tuple
 
 from qbt_rules.api import QBittorrentAPI
-from qbt_rules.utils import parse_tags, is_older_than, is_newer_than
+from qbt_rules.utils import parse_tags, is_older_than, is_newer_than, is_larger_than, is_smaller_than
 from qbt_rules.errors import FieldError, OperatorError, RuleValidationError
 from qbt_rules.logging import get_logger
 
@@ -66,7 +66,8 @@ class ConditionEvaluator:
         Args:
             torrent: Torrent dictionary from qBittorrent API
             conditions: Conditions dictionary from rule
-            trigger: Current trigger type (on_added, on_completed, scheduled, manual)
+            trigger: Current trigger type (on_added, on_completed, scheduled, manual, custom, or None)
+                    When None (trigger-agnostic mode), only matches rules without trigger conditions
 
         Returns:
             True if all conditions match
@@ -76,6 +77,9 @@ class ConditionEvaluator:
             if 'trigger' in conditions:
                 if not self._evaluate_trigger(trigger, conditions['trigger']):
                     return False
+            # In trigger-agnostic mode (trigger=None), skip rules WITH trigger conditions
+            elif trigger is None:
+                return False
 
             # Evaluate logical groups
             if 'all' in conditions:
@@ -101,14 +105,20 @@ class ConditionEvaluator:
         Evaluate trigger condition
 
         Args:
-            current_trigger: Current trigger type
+            current_trigger: Current trigger type (or None for trigger-agnostic mode)
             required_trigger: Required trigger (string or list of strings)
 
         Returns:
             True if trigger matches
+
+        Notes:
+            - When current_trigger is None (trigger-agnostic mode), returns False
+              This ensures rules WITH trigger conditions are skipped in trigger-agnostic mode
+            - When current_trigger is a string, matches against required_trigger
         """
         if current_trigger is None:
-            return True  # No trigger specified in execution
+            # Trigger-agnostic mode: don't match rules with trigger conditions
+            return False
 
         if isinstance(required_trigger, list):
             return current_trigger in required_trigger
@@ -303,6 +313,12 @@ class ConditionEvaluator:
             except (ValueError, TypeError):
                 logger.warning(f"Cannot compare non-numeric values for field {field}")
                 return False
+
+        # Size operators
+        elif operator == 'smaller_than':
+            return is_smaller_than(int(actual), str(expected))
+        elif operator == 'larger_than':
+            return is_larger_than(int(actual), str(expected))
 
         # Time operators
         elif operator == 'older_than':

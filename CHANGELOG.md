@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2024-12-13
+
+### Changed
+- **BREAKING**: Consolidated four separate CLI commands into single unified `qbt-rules` command
+- **BREAKING**: Removed console scripts: `qbt-manual`, `qbt-scheduled`, `qbt-on-added`, `qbt-on-completed`
+- **BREAKING**: Deleted legacy CLI files: `manual.py`, `scheduled.py`, `on_added.py`, `on_completed.py`
+
+### Added
+- New `--trigger` parameter to specify trigger name (manual, scheduled, on_added, on_completed, or custom)
+- New `--torrent-hash` parameter to process specific torrents
+- Support for custom trigger names (completely freeform - any string accepted)
+- Trigger-agnostic mode: `--torrent-hash` without `--trigger` runs rules with no trigger conditions
+- Single unified `qbt-rules` console script replaces all previous commands
+
+### Migration Guide for v0.3.0
+**If upgrading from v0.2.0:**
+
+1. **Update console script usage**:
+   ```bash
+   # Old (v0.2.0)
+   qbt-manual
+   qbt-scheduled
+   qbt-on-added <hash>
+   qbt-on-completed <hash>
+
+   # New (v0.3.0)
+   qbt-rules                                    # defaults to manual trigger
+   qbt-rules --trigger scheduled
+   qbt-rules --trigger on_added --torrent-hash <hash>
+   qbt-rules --trigger on_completed --torrent-hash <hash>
+   ```
+
+2. **Update cron jobs**:
+   ```bash
+   # Old
+   0 * * * * qbt-scheduled
+
+   # New
+   0 * * * * qbt-rules --trigger scheduled
+   ```
+
+3. **Update qBittorrent webhooks**:
+   ```bash
+   # Old webhook command
+   qbt-on-completed %I
+
+   # New webhook command
+   qbt-rules --trigger on_completed --torrent-hash %I
+   ```
+
+4. **Custom triggers now supported**:
+   ```bash
+   # Use any custom trigger name
+   qbt-rules --trigger my_custom_workflow
+   qbt-rules --trigger nightly_cleanup
+   ```
+
+5. **Trigger-agnostic mode** (new feature):
+   ```bash
+   # Process specific torrent with rules that have NO trigger condition
+   qbt-rules --torrent-hash abc123...
+   ```
+
+**Why this change?**
+- Eliminates 98% code duplication across four nearly-identical CLI files
+- Provides single, consistent command-line interface
+- Enables custom trigger names for flexible workflows
+- Simpler codebase maintenance
+- More intuitive CLI design
+
+**Default behavior:**
+- Running `qbt-rules` without `--trigger` defaults to `manual` trigger
+- Running `qbt-rules --torrent-hash <hash>` without `--trigger` uses trigger-agnostic mode (matches only rules with no trigger condition)
+
 ## [0.2.0] - 2024-12-10
 
 ### Changed
@@ -113,7 +187,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Action 'pause' → 'stop'
 - Action 'resume' → 'start'
 
-[Unreleased]: https://github.com/andronics/qbt-rules/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/andronics/qbt-rules/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/andronics/qbt-rules/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/andronics/qbt-rules/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/andronics/qbt-rules/compare/v0.0.1...v0.1.0
 [0.0.1]: https://github.com/andronics/qbt-rules/releases/tag/v0.0.1
