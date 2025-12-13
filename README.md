@@ -112,7 +112,7 @@ qbt-rules --trigger on_completed --torrent-hash abc123...
 **Using Python module:**
 
 ```bash
-python -m qbt_rules.cli.main --dry-run
+python -m qbt_rules.cli --dry-run
 ```
 
 ---

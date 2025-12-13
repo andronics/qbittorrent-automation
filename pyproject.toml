@@ -51,7 +51,7 @@ Issues = "https://github.com/andronics/qbt-rules/issues"
 Changelog = "https://github.com/andronics/qbt-rules/blob/main/CHANGELOG.md"
 
 [project.scripts]
-qbt-rules = "qbt_rules.cli.main:main"
+qbt-rules = "qbt_rules.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
