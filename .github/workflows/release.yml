@@ -13,7 +13,7 @@ on:
 
 permissions:
   contents: write
-  id-token: write  # Required for PyPI Trusted Publishing
+  packages: write  # Required for Docker image publishing
 
 jobs:
   release:
@@ -123,35 +123,15 @@ jobs:
           echo "$CHANGELOG" > release-notes.md
           cat release-notes.md
 
-      - name: Create release archive
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          ARCHIVE="qbt-rules-v${VERSION}.zip"
-
-          # Create archive with source, configs, docs
-          zip -r "$ARCHIVE" \
-            src/ \
-            triggers/ \
-            config/*.example.yml \
-            pyproject.toml \
-            README.md \
-            LICENSE \
-            .gitignore \
-            -x "**/__pycache__/*" "**/*.pyc"
-
-          echo "Created $ARCHIVE"
-          ls -lh "$ARCHIVE"
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Release ${{ steps.version.outputs.tag }}
           body_path: release-notes.md
-          files: |
-            qbt-rules-v${{ steps.version.outputs.version }}.zip
           draft: false
           prerelease: ${{ contains(steps.version.outputs.tag, 'a') || contains(steps.version.outputs.tag, 'b') || contains(steps.version.outputs.tag, 'rc') }}
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -169,86 +149,13 @@ jobs:
             git push origin HEAD:main || echo "Could not push to main (might be protected)"
           fi
 
-  build:
-    name: Build Distribution Packages
-    needs: release
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: main  # Use main branch which has the updated version from release job
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install build tools
+      - name: Release summary
         run: |
-          python -m pip install --upgrade pip
-          pip install build twine
-          echo "✓ Build tools installed"
-
-      - name: Build distribution packages
-        run: |
-          python -m build
-          echo "✓ Distribution packages built"
-          ls -lh dist/
-
-      - name: Verify distributions
-        run: |
-          twine check dist/*
-          echo "✓ Distribution packages verified"
-
-      - name: Upload distributions
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
-
-  test-publish:
-    name: Publish to TestPyPI
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/project/qbt-rules/
-
-    steps:
-      - name: Download distributions
-        uses: actions/download-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
-
-      - name: Publish to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          skip-existing: true
-          print-hash: true
-
-  publish:
-    name: Publish to PyPI
-    needs: [build, test-publish]
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    environment:
-      name: pypi
-      url: https://pypi.org/project/qbt-rules/
-
-    steps:
-      - name: Download distributions
-        uses: actions/download-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          print-hash: true
-          attestations: true
+          echo "✅ Release ${{ steps.version.outputs.tag }} created successfully"
+          echo ""
+          echo "🐳 Docker images will be built and published automatically by docker-build.yml workflow"
+          echo "   Image: ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}"
+          echo "   Image: ghcr.io/${{ github.repository }}:latest"
+          echo ""
+          echo "📦 Distribution: Docker-only (v0.4.0+)"
+          echo "   Previous PyPI packages (v0.3.x) remain available but are deprecated"

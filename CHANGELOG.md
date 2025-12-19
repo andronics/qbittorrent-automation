@@ -7,6 +7,353 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Automatic Default Config Creation**: On first run, default `config.yml` and `rules.yml` files are automatically copied from `/usr/share/qbt-rules/` to the config directory if they don't exist. This eliminates manual configuration file setup for new users.
+- **HTTP Access Log Control**: Added `logging.http_access` configuration option (default: false) to suppress Docker health check logs from polluting console output. Set to `true` for debugging.
+- **Required Field Validation**: Rules now must have `name`, `conditions`, and `actions` fields - clear error messages if missing
+- **Cache Updates After Actions**: Later rules in the same execution now see changes made by earlier rules (tags, categories, etc.)
+
+### Changed
+- **BREAKING**: Removed legacy `--trigger` parameter - use `--context` instead
+- **Context is now fully user-defined**: No special context values (on_added, scheduled, etc.) - use any custom string identifier you want
+- Documentation and examples updated to show custom context names (torrent-imported, weekly-cleanup, download-finished, adhoc-run)
+- Fixed critical bug: Rules without `context` field now correctly execute regardless of runtime context
+- Fixed bug: `context` field moved from inside `conditions` block to rule level (sibling to conditions/actions)
+- Renamed example config files from `.example.yml` to `.default.yml` to reflect their new role as automatic defaults
+- Updated Docker image to bundle default configs in `/usr/share/qbt-rules/` (Linux FHS standard)
+- Simplified Quick Start documentation - manual config file download no longer required
+- Health check endpoint (`/api/health`) logs are now suppressed by default to reduce console noise
+- `--list-rules` now shows "Context" column instead of "Trigger"
+
+### Migration Guide
+- Replace `--trigger` with `--context` in scripts/cron jobs
+- The `context` field (if used) should be at rule level, not inside `conditions`
+- Context values are user-defined - use descriptive names that make sense for your workflow
+
+## [0.4.0] - 2024-12-14
+
+### 🚀 Major Release - Complete Architectural Transformation
+
+v0.4.0 introduces a complete redesign with client-server architecture, HTTP API, persistent job queue, and Docker-first deployment.
+
+**⚠️ BREAKING CHANGES:**
+- Distribution changed from PyPI package to Docker images (ghcr.io/andronics/qbt-rules)
+- Architecture changed from standalone CLI to client-server model
+- Terminology changed from "trigger" to "context" (backward compatible flags exist)
+- Configuration file structure updated (see config.example.yml)
+
+### Added
+
+#### Core Architecture
+- **Client-Server Architecture**: HTTP API server with background worker thread
+- **Persistent Job Queue**: Sequential job processing with state tracking
+  - SQLite backend (default, zero dependencies)
+  - Redis backend (optional, for high-performance scenarios)
+  - Job states: pending → processing → completed/failed/cancelled
+- **RESTful HTTP API**: 7 endpoints for job management and monitoring
+- **Worker Thread**: Background job processor with graceful shutdown support
+
+#### Queue Backends
+- **SQLite Queue Backend** - File-based persistence with thread-safety, WAL mode, ACID transactions
+- **Redis Queue Backend** - In-memory performance with connection pooling and atomic operations
+
+#### Configuration & Security
+- **Universal _FILE Support**: All environment variables support _FILE suffix for Docker secrets
+- **API Key Authentication**: Secure webhook endpoints with constant-time comparison
+- **Standardized Environment Variables**: All use QBT_RULES_* prefix
+- **Configuration Resolution Priority**: CLI → ENV_FILE → ENV → config.yml → defaults
+
+#### Docker & Deployment
+- **Multi-stage Dockerfile**: Optimized build with Python 3.11, multi-platform (amd64, arm64)
+- **Docker Compose Examples**: Minimal (SQLite), Redis backend, and full-stack configurations
+- **GitHub Actions Workflows**: Automated Docker builds and publishing to ghcr.io
+
+#### Documentation
+- **Architecture Documentation** (docs/Architecture.md) - System design, components, data flow
+- **HTTP API Reference** (docs/API.md) - Complete endpoint documentation with examples
+- **Docker Deployment Guide** (docs/Docker.md) - Installation, scenarios, monitoring, troubleshooting
+- **Implementation Plan** (PLAN.md) - 700+ line detailed specification
+
+#### qBittorrent Integration
+- **qbittorrent-api Package**: Multi-version support (v4.1+ through v5.1.4+) with zero data loss
+
+#### CLI Enhancements
+- **Server Mode**: qbt-rules --serve to run HTTP API server
+- **Client Mode**: Submit jobs to remote server via HTTP API
+- **Job Management**: --list-jobs, --job-status, --cancel-job, --stats, --wait
+- **20+ New CLI Flags** for server, client, queue, and job management
+- **Backward Compatibility**: --trigger flag mapped to --context
+
+### Changed
+
+#### Terminology
+- **"Trigger" → "Context"** throughout codebase (backward compatible via CLI flag mapping)
+
+#### Architecture
+- **Execution Model**: Direct CLI → HTTP API + persistent queue
+- **Processing**: Immediate → Sequential queue-based
+- **State**: Stateless → Stateful with job tracking
+- **Distribution**: PyPI → Docker images (ghcr.io)
+
+#### Configuration
+- Updated config.example.yml structure with server/client/queue sections
+- All environment variables use QBT_RULES_* prefix
+- Rules file: trigger: → context: (optional, backward compatible)
+
+#### Dependencies
+- **Added**: qbittorrent-api, Flask, gunicorn
+- **Optional**: redis
+
+### Deprecated
+
+- **PyPI Distribution**: v0.3.x remains available but deprecated (v0.4.0+ is Docker-only)
+- **Standalone CLI**: Direct execution still works but not recommended (use client mode or API)
+
+### Fixed
+
+- Race conditions via sequential queue processing
+- Job persistence across restarts
+- Multi-threading safety with thread-safe queues
+- Clear configuration precedence order
+
+### Migration Guide
+
+**From v0.3.x to v0.4.0:**
+
+1. **Rules File**: Optional - change trigger: to context: (backward compatible)
+2. **Configuration**: Update structure following config.example.yml
+3. **Deployment**: Replace PyPI with Docker Compose
+4. **Execution**: Use HTTP API or client mode instead of direct CLI
+5. **Monitoring**: Use /api/health, /api/stats, /api/jobs
+
+See README.md for detailed migration examples.
+
+
+### 🚀 Major Release - Complete Architectural Transformation
+
+v0.4.0 introduces a complete redesign with client-server architecture, HTTP API, persistent job queue, and Docker-first deployment.
+
+**⚠️ BREAKING CHANGES:**
+- Distribution changed from PyPI package to Docker images (ghcr.io)
+- Architecture changed from standalone CLI to client-server model
+- Terminology changed from "trigger" to "context" (backward compatible flags exist)
+- Configuration file structure updated (see config.example.yml)
+
+### Added
+
+#### Core Architecture
+- **Client-Server Architecture**: HTTP API server with background worker thread
+- **Persistent Job Queue**: Sequential job processing with state tracking
+  - SQLite backend (default, zero dependencies)
+  - Redis backend (optional, for high-performance scenarios)
+  - Job states: pending → processing → completed/failed/cancelled
+- **RESTful HTTP API**: 7 endpoints for job management and monitoring
+  - `POST /api/execute` - Queue rules execution job
+  - `GET /api/jobs` - List jobs with filtering and pagination
+  - `GET /api/jobs/:id` - Get job status and results
+  - `DELETE /api/jobs/:id` - Cancel pending job
+  - `GET /api/health` - Health check (unauthenticated)
+  - `GET /api/stats` - Server statistics
+  - `GET /api/version` - Version information
+- **Worker Thread**: Background job processor with graceful shutdown support
+
+#### Queue Backends
+- **SQLite Queue Backend** (`src/qbt_rules/queue_backends/sqlite_queue.py`):
+  - File-based persistence (/config/qbt-rules.db)
+  - Thread-safe with connection-per-thread pattern
+  - WAL mode for improved concurrency
+  - ACID transactions
+  - Automatic schema migration
+- **Redis Queue Backend** (`src/qbt_rules/queue_backends/redis_queue.py`):
+  - In-memory performance with optional persistence
+  - Connection pooling
+  - Multiple data structures (LIST, HASH, SET, ZSET)
+  - Atomic operations for job state management
+
+#### Configuration & Security
+- **Universal `_FILE` Support**: All environment variables support `_FILE` suffix for Docker secrets
+- **API Key Authentication**: Secure webhook endpoints with constant-time comparison
+- **Standardized Environment Variables**: All use `QBT_RULES_*` prefix
+- **Configuration Resolution Priority**: CLI → ENV_FILE → ENV → config.yml → defaults
+- **Health Check Endpoint**: Unauthenticated `/api/health` for container orchestration
+
+#### Docker & Deployment
+- **Multi-stage Dockerfile**: Optimized build with Python 3.11
+- **Multi-platform Support**: Docker images for linux/amd64 and linux/arm64
+- **Docker Compose Examples**:
+  - `docker-compose.yml` - Minimal setup with SQLite
+  - `docker-compose.redis.yml` - Redis backend setup
+  - `docker-compose.full-stack.yml` - Complete stack with qBittorrent
+- **GitHub Actions Workflows**:
+  - `docker-build.yml` - Automated Docker image builds and publishing to ghcr.io
+  - Updated `release.yml` - Docker-focused release process (removed PyPI publishing)
+
+#### Documentation
+- **Complete Architecture Documentation** (`docs/Architecture.md`):
+  - System design diagrams
+  - Component descriptions
+  - Data flow explanations
+  - Queue backend comparison
+  - Configuration resolution logic
+  - Security model
+- **HTTP API Reference** (`docs/API.md`):
+  - Complete endpoint documentation
+  - Request/response examples
+  - Error handling guide
+  - Python client examples
+  - Prometheus integration example
+- **Docker Deployment Guide** (`docs/Docker.md`):
+  - Installation instructions
+  - Deployment scenarios (standalone, Redis, full-stack, reverse proxy)
+  - Secrets management
+  - Networking configuration
+  - Monitoring and troubleshooting
+  - Advanced topics (scheduled execution, backups, auto-updates)
+- **Implementation Plan** (`PLAN.md`): 700+ line detailed implementation specification
+
+#### qBittorrent Integration
+- **qbittorrent-api Package**: Migrated from direct API calls to qbittorrent-api wrapper
+  - Multi-version support (qBittorrent v4.1+ through v5.1.4+)
+  - Automatic version detection
+  - Zero data loss (all existing fields available)
+  - Improved error handling
+
+#### CLI Enhancements
+- **Server Mode**: `qbt-rules --serve` to run HTTP API server
+- **Client Mode**: Submit jobs to remote server via HTTP API
+- **Job Management Commands**:
+  - `--list-jobs` - List all jobs
+  - `--job-status <id>` - Get job status
+  - `--cancel-job <id>` - Cancel pending job
+  - `--stats` - Show server statistics
+  - `--wait` - Wait for job completion (synchronous behavior)
+- **20+ New CLI Flags** for server, client, queue, and job management configuration
+- **Backward Compatibility**: `--trigger` flag mapped to `--context` automatically
+
+### Changed
+
+#### Terminology
+- **"Trigger" → "Context"** throughout codebase and documentation
+  - `trigger:` condition in rules → `context:`
+  - `--trigger` CLI flag → `--context`
+  - Rules engine parameter renamed: `trigger` → `context`
+  - Configuration sections updated
+  - Backward compatible: old `trigger:` syntax still works
+
+#### Architecture
+- **Execution Model**: Direct CLI invocation → HTTP API + persistent queue
+- **Processing**: Immediate execution → Sequential queue-based processing
+- **State Management**: Stateless → Stateful with job tracking and history
+- **Distribution**: PyPI package → Docker images (ghcr.io/andronics/qbt-rules)
+
+#### Configuration
+- **File Structure**: Updated config.example.yml with new sections:
+  - `server:` - HTTP API server configuration
+  - `client:` - CLI client configuration
+  - `queue:` - Queue backend configuration
+  - `qbittorrent:` - qBittorrent connection (unchanged)
+- **Environment Variables**: All standardized with `QBT_RULES_*` prefix
+- **Rules File**: Minimal changes (`trigger:` → `context:`, optional for compatibility)
+
+#### Dependencies
+- **Added**:
+  - `qbittorrent-api>=2024.12.0` - Multi-version qBittorrent support
+  - `Flask>=3.0.0` - HTTP API framework
+  - `gunicorn>=21.2.0` - Production WSGI server
+- **Optional Dependencies**:
+  - `redis>=5.0.0` - Redis queue backend support
+- **Unchanged**:
+  - `requests>=2.31.0`
+  - `PyYAML>=6.0.2`
+
+### Deprecated
+
+- **PyPI Distribution**: v0.3.x remains available on PyPI but is deprecated
+  - No new PyPI releases planned (v0.4.0+ is Docker-only)
+  - Users encouraged to migrate to Docker deployment
+- **Standalone CLI Mode**: Direct execution without server still works but not recommended
+  - Use client mode (`--client-server-url`) or HTTP API instead
+
+### Fixed
+
+- **Race Conditions**: Sequential queue processing prevents concurrent rule execution
+- **Job Persistence**: Jobs survive server restarts and crashes
+- **Multi-threading Safety**: Thread-safe queue implementations
+- **Configuration Precedence**: Clear priority order (CLI → ENV → file → defaults)
+
+### Migration Guide
+
+**From v0.3.x to v0.4.0:**
+
+1. **Rules File** (`rules.yml`):
+   - Optional: Change `trigger:` to `context:` (backward compatible)
+   - No other changes required
+
+2. **Configuration** (`config.yml`):
+   - Update structure following `config.example.yml`
+   - Add server/client/queue sections
+   - Set `QBT_RULES_SERVER_API_KEY`
+
+3. **Deployment**:
+   - Replace PyPI installation with Docker Compose
+   - Replace cron/systemd timers with:
+     - Webhook integration (qBittorrent "Run external program")
+     - Cron container for scheduled execution
+   - Configure volume mounts for `/config`
+
+4. **Execution**:
+   - Replace `qbt-rules --trigger scheduled` with:
+     - HTTP API: `curl -X POST "http://localhost:5000/api/execute?context=scheduled&key=KEY"`
+     - Client mode: `qbt-rules --context scheduled --client-server-url http://localhost:5000`
+
+5. **Monitoring**:
+   - Use `/api/health` for health checks
+   - Use `/api/stats` for statistics
+   - Use `/api/jobs` for execution history
+
+**Example Migration:**
+
+Before (v0.3.x):
+```bash
+# Cron job
+*/5 * * * * /usr/local/bin/qbt-rules --trigger scheduled
+```
+
+After (v0.4.0):
+```yaml
+# docker-compose.yml
+services:
+  qbt-rules:
+    image: ghcr.io/andronics/qbt-rules:latest
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./config:/config
+    environment:
+      QBT_RULES_SERVER_API_KEY: "secure-key"
+      QBT_RULES_QBITTORRENT_HOST: "http://qbittorrent:8080"
+
+  qbt-rules-cron:
+    image: alpine:latest
+    command: >
+      sh -c "
+        apk add curl &&
+        echo '*/5 * * * * curl -X POST http://qbt-rules:5000/api/execute?context=scheduled&key=secure-key' | crontab - &&
+        crond -f
+      "
+```
+
+## [0.3.2] - 2024-12-13
+
+### Added
+- Enhanced documentation with clearer trigger mechanism explanation
+- Improved README with detailed examples
+- Better logging for rule evaluation
+
+### Fixed
+- Build job now correctly checks out main branch for updated version
+- Release workflow improved for reliability
+
 ## [0.3.1] - 2025-12-13
 
 ### Added
