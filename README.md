@@ -1,80 +1,108 @@
 # qbt-rules
 
-A powerful Python-based rules engine for automating torrent management in qBittorrent using declarative YAML configuration.
+A powerful client-server automation engine for qBittorrent with HTTP API, persistent job queue, and Docker-first deployment.
 
 [![GitHub Release](https://img.shields.io/github/v/release/andronics/qbt-rules)](https://github.com/andronics/qbt-rules/releases)
+[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/andronics/qbt-rules/pkgs/container/qbt-rules)
 [![License: Unlicense](https://img.shields.io/badge/license-Unlicense-blue.svg)](http://unlicense.org/)
 
 ---
 
 ## What is qbt-rules?
 
-qbt-rules is a Python-based rules engine that automates torrent management through the qBittorrent Web API v5.0+. Define YAML-based rules to automatically categorize, tag, pause, resume, delete, and manage torrents based on flexible conditions.
+qbt-rules is a **client-server automation engine** for qBittorrent that processes torrent management rules through a persistent job queue. Define YAML-based rules to automatically categorize, tag, pause, resume, delete, and manage torrents based on flexible conditions.
+
+**v0.4.0 introduces a complete architectural transformation:**
+
+- 🚀 **Client-Server Architecture** - HTTP API with background worker
+- 📦 **Persistent Job Queue** - SQLite (default) or Redis backends
+- 🐳 **Docker-First Deployment** - Containerized with multi-platform support (amd64, arm64)
+- 🔐 **API Key Authentication** - Secure webhook endpoints
+- 📊 **Job Management** - Track execution history, status, and statistics
+- ⚡ **Sequential Processing** - Prevent race conditions with queue-based execution
 
 **Key Features:**
 
-- **Declarative YAML Rules** - No coding required, just write rules
-- **Multiple Trigger Types** - Manual, scheduled (cron), webhooks (on_added, on_completed)
+- **Declarative YAML Rules** - No coding required
+- **Multiple Execution Contexts** - Manual, weekly-cleanup (cron), webhooks (torrent-imported, download-finished)
 - **Powerful Conditions** - Complex logic with AND/OR/NOT groups, 17+ operators
 - **Rich Field Access** - Dot notation access to all torrent metadata (info.*, trackers.*, files.*, etc.)
-- **Idempotent Actions** - Safe to run repeatedly, actions skip if already applied
-- **Dry-Run Mode** - Test rules without making changes
-- **Comprehensive Logging** - Trace mode for debugging
+- **Idempotent Actions** - Safe to run repeatedly
+- **RESTful HTTP API** - Job submission, status tracking, statistics
+- **Universal Docker Secrets** - All config values support `_FILE` suffix
+- **Multi-Version qBittorrent Support** - v4.1+ through v5.1.4+ via qbittorrent-api
 
 ---
 
 ## Quick Start
 
+### Prerequisites
+
+- Docker and Docker Compose
+- qBittorrent with Web UI enabled
+
 ### Installation
 
-**Option 1: Install from PyPI (recommended)**
-
 ```bash
-# Install the package
-pip install qbt-rules
-
-# Create config directory
-mkdir -p ~/.config/qbt-rules
-
-# Download example configs
-curl -o ~/.config/qbt-rules/config.yml \
-  https://raw.githubusercontent.com/andronics/qbt-rules/main/config/config.example.yml
-curl -o ~/.config/qbt-rules/rules.yml \
-  https://raw.githubusercontent.com/andronics/qbt-rules/main/config/rules.example.yml
-
-# Edit config with your qBittorrent credentials
-nano ~/.config/qbt-rules/config.yml
+# Create directory structure
+mkdir -p qbt-rules/config
+cd qbt-rules
 ```
 
-**Option 2: Install from source**
+> **Note:** On first run, default configuration files (`config.yml` and `rules.yml`) will be automatically created in the `/config` directory. You can then edit them to customize your setup.
+
+### Create docker-compose.yml
+
+```yaml
+version: '3.8'
+
+services:
+  qbt-rules:
+    image: ghcr.io/andronics/qbt-rules:latest
+    container_name: qbt-rules
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./config:/config
+    environment:
+      # Server configuration
+      QBT_RULES_SERVER_API_KEY: "your-secure-api-key-here"  # Change this!
+
+      # qBittorrent connection
+      QBT_RULES_QBITTORRENT_HOST: "http://qbittorrent:8080"
+      QBT_RULES_QBITTORRENT_USERNAME: "admin"
+      QBT_RULES_QBITTORRENT_PASSWORD: "adminpass"
+
+      # Queue (SQLite default)
+      QBT_RULES_QUEUE_BACKEND: "sqlite"
+      QBT_RULES_QUEUE_SQLITE_PATH: "/config/qbt-rules.db"
+```
+
+### Start the Server
 
 ```bash
-# Clone the repository
-git clone https://github.com/andronics/qbt-rules.git
-cd qbt-rules
+# Start container
+docker-compose up -d
 
-# Install in editable mode with development dependencies
-pip install -e ".[dev]"
+# Check health
+curl http://localhost:5000/api/health
 
-# Copy example configs
-cp config/config.example.yml config/config.yml
-cp config/rules.example.yml config/rules.yml
-
-# Edit config with your qBittorrent credentials
-nano config/config.yml
+# View logs
+docker-compose logs -f qbt-rules
 ```
 
 ### Your First Rule
 
-Create a simple rule in `config/rules.yml`:
+Edit `config/rules.yml`:
 
 ```yaml
 rules:
   - name: "Auto-categorize HD movies"
     enabled: true
     stop_on_match: true
+    context: torrent-imported  # Runs when torrents are added
     conditions:
-      trigger: on_added
       all:
         - field: info.name
           operator: matches
@@ -85,155 +113,183 @@ rules:
           category: "Movies-HD"
       - type: add_tag
         params:
-          tag: "movies"
+          tags:
+            - hd
+            - auto-categorized
 ```
 
-### Run It
+### Execute Rules
 
-**Using console script (after pip install):**
-
+**Using HTTP API:**
 ```bash
-# Test with dry-run (shows what would happen)
-qbt-rules --dry-run
+# Queue a weekly-cleanup rules job
+curl -X POST "http://localhost:5000/api/execute?context=weekly-cleanup&key=your-api-key"
 
-# Run rules WITHOUT a trigger filter (default behavior)
-qbt-rules
+# Process specific torrent (webhook)
+curl -X POST "http://localhost:5000/api/execute?context=download-finished&hash=abc123...&key=your-api-key"
 
-# Enable trace logging for debugging
-qbt-rules --trace
+# Check job status
+curl "http://localhost:5000/api/jobs?key=your-api-key" | jq
 
-# Run rules WITH a specific trigger
-qbt-rules --trigger scheduled
-
-# Process specific torrent with trigger
-qbt-rules --trigger on_completed --hash abc123...
-
-# Run ALL rules (ignore trigger filters)
-qbt-rules --trigger none
+# Get statistics
+curl "http://localhost:5000/api/stats?key=your-api-key" | jq
 ```
 
-**Using Python module:**
-
+**Using CLI (client mode):**
 ```bash
-python -m qbt_rules.cli --dry-run
+# Install CLI client (optional)
+docker exec qbt-rules qbt-rules --context weekly-cleanup --wait
+
+# Or from host (if qbt-rules pip package installed)
+pip install qbt-rules
+qbt-rules --context weekly-cleanup --client-server-url http://localhost:5000 --client-api-key your-api-key
 ```
 
 ---
 
-## How It Works
+## Architecture
+
+qbt-rules v0.4.0 uses a client-server architecture with persistent job queue:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    TRIGGER ACTIVATION                       │
-│  (Manual, Scheduled, on_added, on_completed)               │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│              FETCH TORRENTS FROM qBittorrent               │
-│         (Optional: Apply filters by category/state)         │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   FOR EACH TORRENT:                        │
-│  ┌──────────────────────────────────────────────────────┐  │
-│  │  Evaluate Rules in File Order                        │  │
-│  │  ┌────────────────────────────────────────────────┐  │  │
-│  │  │  Check Conditions (all/any/none groups)        │  │  │
-│  │  │  ├─ Access fields (info.*, trackers.*, etc.)   │  │  │
-│  │  │  ├─ Apply operators (==, >, contains, etc.)    │  │  │
-│  │  │  └─ Combine with AND/OR/NOT logic             │  │  │
-│  │  └────────────┬───────────────────────────────────┘  │  │
-│  │               │                                       │  │
-│  │               ├─ Match? ──► Execute Actions          │  │
-│  │               │             (stop, categorize, etc.)  │  │
-│  │               │                                       │  │
-│  │               └─ No Match? ──► Next Rule             │  │
-│  └──────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                     CLIENT LAYER                                │
+│                                                                 │
+│  Webhook → HTTP API ← Cron Container ← Manual CLI              │
+│              │                                                  │
+│              └──── POST /api/execute?context=X&key=Y            │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     SERVER LAYER                                │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────┐       │
+│  │  Flask HTTP API (Gunicorn)                          │       │
+│  │  • POST /api/execute  - Queue job                   │       │
+│  │  • GET  /api/jobs     - List jobs                   │       │
+│  │  • GET  /api/health   - Health check                │       │
+│  │  • GET  /api/stats    - Statistics                  │       │
+│  └─────────────────┬───────────────────────────────────┘       │
+│                    │                                            │
+│                    ▼                                            │
+│  ┌─────────────────────────────────────────────────────┐       │
+│  │  Queue Manager (SQLite or Redis)                    │       │
+│  │  • Persistent job storage                           │       │
+│  │  • Job states: pending → processing → completed     │       │
+│  └─────────────────┬───────────────────────────────────┘       │
+│                    │                                            │
+│                    ▼                                            │
+│  ┌─────────────────────────────────────────────────────┐       │
+│  │  Worker Thread (Background)                         │       │
+│  │  • Dequeues jobs sequentially                       │       │
+│  │  • Executes via RulesEngine                         │       │
+│  │  • Updates job status with results                  │       │
+│  └─────────────────┬───────────────────────────────────┘       │
+│                    │                                            │
+│                    ▼                                            │
+│  ┌─────────────────────────────────────────────────────┐       │
+│  │  Rules Engine                                       │       │
+│  │  • Loads rules.yml                                  │       │
+│  │  • Evaluates conditions (context filter)            │       │
+│  │  • Executes actions (idempotent)                    │       │
+│  └─────────────────┬───────────────────────────────────┘       │
+└────────────────────┼────────────────────────────────────────────┘
+                     │
+                     ▼
+              ┌─────────────┐
+              │ qBittorrent │
+              │   Server    │
+              └─────────────┘
 ```
 
-**Rules execute top-to-bottom.** Use `stop_on_match: true` to prevent later rules from running after a match.
+**Benefits:**
+- **Sequential Execution**: Jobs process one at a time (no race conditions)
+- **Persistence**: Jobs survive server restarts
+- **Monitoring**: Track job history, status, and execution stats
+- **Scalability**: Optional Redis backend for high webhook volume
+
+📖 **[Complete Architecture Documentation](docs/Architecture.md)**
 
 ---
 
 ## Core Concepts
 
-### Triggers
+### Execution Contexts
 
-Triggers are rule filters that control when rules execute. Rules specify a `trigger` condition, and you use the `--trigger` flag to run matching rules.
-
-**How Trigger Filtering Works:**
+Contexts filter which rules execute. Rules specify a `context:` condition, and jobs are submitted with a context parameter.
 
 ```bash
-# No --trigger flag: Runs ONLY rules WITHOUT a trigger condition
-qbt-rules
-
-# --trigger <name>: Runs ONLY rules WITH that trigger name
-qbt-rules --trigger scheduled
-qbt-rules --trigger on_added --hash abc123
-
-# --trigger none: Runs ALL rules (ignores trigger filters)
-qbt-rules --trigger none
+# Submit job with context
+curl -X POST "http://localhost:5000/api/execute?context=weekly-cleanup&key=YOUR_KEY"
 ```
 
-**There are no built-in triggers** - all trigger names are arbitrary. You define them in your rules and specify them at runtime.
+**Common Contexts:**
 
-**Common Trigger Naming Conventions:**
+| Context | Use Case | Trigger Method |
+|---------|----------|----------------|
+| `weekly-cleanup` | Periodic maintenance | Cron container or systemd timer |
+| `torrent-imported` | Torrent added event | qBittorrent webhook |
+| `download-finished` | Download completed | qBittorrent webhook |
+| `adhoc-run` | Manual execution | CLI or API call |
 
-| Trigger Name | Typical Use Case | Example Schedule |
-|--------------|------------------|------------------|
-| **scheduled** | Periodic maintenance | Cron/systemd hourly/daily |
-| **on_added** | qBittorrent webhook | When torrent added |
-| **on_completed** | qBittorrent webhook | When download completes |
-| **hourly** | Frequent checks | Every hour |
-| **nightly** | Daily cleanup | 3 AM daily |
-| **weekly** | Weekly tasks | Sunday midnight |
-
-**Example Rules:**
+**Example Rule with Context:**
 
 ```yaml
-# This rule runs when: qbt-rules --trigger scheduled
-- name: "Cleanup old torrents"
-  conditions:
-    trigger: scheduled  # Only runs with --trigger scheduled
-    all:
-      - field: info.completion_on
-        operator: older_than
-        value: "30 days"
-  actions:
-    - type: delete_torrent
-
-# This rule runs when: qbt-rules (no --trigger flag)
-- name: "Always check large downloads"
-  conditions:
-    # No trigger specified - runs by default
-    all:
-      - field: info.size
-        operator: larger_than
-        value: "50GB"
-  actions:
-    - type: add_tag
-      params:
-        tag: "large"
+rules:
+  - name: "Cleanup old torrents"
+    context: weekly-cleanup  # Only runs when context=weekly-cleanup
+    conditions:
+      all:
+        - field: info.completion_on
+          operator: older_than
+          value: "30 days"
+    actions:
+      - type: delete_torrent
+        params:
+          keep_files: true
 ```
 
-**[📖 Detailed Trigger Documentation](https://github.com/andronics/qbt-rules/wiki/Triggers)**
+📖 **[Context Documentation](docs/Architecture.md#data-flow)**
+
+---
 
 ### Conditions
 
 Combine conditions with logical groups:
 
 - **all** - AND logic (all conditions must match)
-- **any** - OR logic (at least one condition must match)
+- **any** - OR logic (at least one must match)
 - **none** - NOT logic (no conditions can match)
 
 **Available Operators:**
 
 `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`, `not_contains`, `matches`, `in`, `not_in`, `older_than`, `newer_than`, `smaller_than`, `larger_than`
 
-**[📖 Detailed Condition Documentation](https://github.com/andronics/qbt-rules/wiki/Conditions)**
+**Example:**
+```yaml
+- name: "High ratio seeded torrents"
+  context: weekly-cleanup
+  conditions:
+    all:
+      - field: info.ratio
+        operator: '>='
+        value: 2.0
+      - field: info.seeding_time
+        operator: '>'
+        value: 604800  # 7 days in seconds
+    none:
+      - field: info.category
+        operator: in
+        value: [seedbox, long-term]
+  actions:
+    - type: add_tag
+      params:
+        tags:
+          - ready-to-remove
+```
+
+---
 
 ### Available Fields
 
@@ -245,12 +301,14 @@ Access torrent data using dot notation across 8 API categories:
 | `trackers.*` | Tracker data (collection) | `trackers.url`, `trackers.status`, `trackers.msg` |
 | `files.*` | File list (collection) | `files.name`, `files.size`, `files.progress` |
 | `properties.*` | Extended properties | `properties.save_path`, `properties.comment` |
-| `transfer.*` | Global transfer stats | `transfer.dl_speed_global`, `transfer.up_speed_global` |
-| `app.*` | Application info | `app.version`, `app.api_version` |
+| `transfer.*` | Global transfer stats | `transfer.dl_speed`, `transfer.up_speed` |
+| `app.*` | Application info | `app.version`, `app.encryption` |
 | `peers.*` | Peer data (collection) | `peers.ip`, `peers.client`, `peers.progress` |
 | `webseeds.*` | Web seed data (collection) | `webseeds.url` |
 
-**[📖 Complete Field Reference](https://github.com/andronics/qbt-rules/wiki/Available-Fields)**
+📖 **[Complete Field Reference](config/rules.default.yml)**
+
+---
 
 ### Actions
 
@@ -260,25 +318,251 @@ Execute one or more actions when conditions match:
 |--------|-------------|
 | `stop` / `start` / `force_start` | Control torrent state |
 | `recheck` / `reannounce` | Maintenance operations |
-| `delete_torrent` | Remove torrent (optionally with files) |
-| `set_category` | Set torrent category |
-| `add_tag` / `remove_tag` / `set_tags` | Manage tags |
+| `delete_torrent` | Remove torrent (with/without files) |
+| `set_category` | Set category |
+| `add_tag` / `remove_tag` / `set_tags` | Tag management |
 | `set_upload_limit` / `set_download_limit` | Speed limiting |
 
-**[📖 Detailed Action Documentation](https://github.com/andronics/qbt-rules/wiki/Actions)**
+**Example:**
+```yaml
+actions:
+  - type: set_category
+    params:
+      category: "Movies-HD"
+  - type: add_tag
+    params:
+      tags:
+        - hd
+        - private
+  - type: set_upload_limit
+    params:
+      limit: 1048576  # 1 MB/s in bytes
+```
+
+---
+
+## Deployment Scenarios
+
+### Webhook Integration (qBittorrent)
+
+Configure qBittorrent to fire webhooks on events:
+
+1. **qBittorrent Settings** → Web UI → Advanced
+2. **Run external program on torrent completion:**
+   ```bash
+   curl -X POST "http://qbt-rules:5000/api/execute?context=download-finished&hash=%I&key=YOUR_API_KEY"
+   ```
+
+**qBittorrent Variables:**
+- `%I` - Torrent hash
+- `%N` - Torrent name
+- `%L` - Category
+- `%F` - Content path
+
+---
+
+### Scheduled Execution (Cron Container)
+
+Add to docker-compose.yml:
+
+```yaml
+services:
+  qbt-rules-cron:
+    image: alpine:latest
+    restart: unless-stopped
+    command: >
+      sh -c "
+        apk add --no-cache curl &&
+        echo '*/5 * * * * curl -X POST http://qbt-rules:5000/api/execute?context=weekly-cleanup&key=YOUR_KEY' | crontab - &&
+        crond -f -l 2
+      "
+    depends_on:
+      - qbt-rules
+    networks:
+      - qbt-network
+```
+
+---
+
+### Redis Queue Backend (High Performance)
+
+For high webhook volume, use Redis:
+
+```yaml
+version: '3.8'
+
+services:
+  qbt-rules:
+    image: ghcr.io/andronics/qbt-rules:latest
+    environment:
+      QBT_RULES_QUEUE_BACKEND: "redis"
+      QBT_RULES_QUEUE_REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+
+volumes:
+  redis-data:
+```
+
+📖 **[Docker Deployment Guide](docs/Docker.md)**
+
+---
+
+## HTTP API Reference
+
+### POST /api/execute
+
+Queue a rules execution job.
+
+**Request:**
+```bash
+curl -X POST "http://localhost:5000/api/execute?context=weekly-cleanup&key=YOUR_KEY"
+```
+
+**Response (202 Accepted):**
+```json
+{
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "context": "weekly-cleanup",
+  "status": "pending",
+  "created_at": "2024-01-15T10:30:00.123456"
+}
+```
+
+---
+
+### GET /api/jobs
+
+List jobs with filtering and pagination.
+
+**Request:**
+```bash
+curl "http://localhost:5000/api/jobs?status=completed&limit=10&key=YOUR_KEY"
+```
+
+**Response:**
+```json
+{
+  "total": 150,
+  "jobs": [
+    {
+      "job_id": "...",
+      "context": "weekly-cleanup",
+      "status": "completed",
+      "result": {
+        "total_torrents": 42,
+        "rules_matched": 5,
+        "actions_executed": 8
+      }
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/health
+
+Health check endpoint (no authentication required).
+
+**Request:**
+```bash
+curl http://localhost:5000/api/health
+```
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "version": "0.4.0",
+  "queue": {
+    "backend": "SQLiteQueue",
+    "pending_jobs": 2
+  },
+  "worker": {
+    "status": "running"
+  }
+}
+```
+
+📖 **[Complete API Reference](docs/API.md)**
+
+---
+
+## Configuration
+
+### Environment Variables
+
+All variables support `_FILE` suffix for Docker secrets:
+
+```yaml
+environment:
+  # Server
+  QBT_RULES_SERVER_HOST: "0.0.0.0"
+  QBT_RULES_SERVER_PORT: "5000"
+  QBT_RULES_SERVER_API_KEY: "your-secret-key"
+  # Or use Docker secret:
+  # QBT_RULES_SERVER_API_KEY_FILE: "/run/secrets/api_key"
+
+  # Queue
+  QBT_RULES_QUEUE_BACKEND: "sqlite"  # or "redis"
+  QBT_RULES_QUEUE_SQLITE_PATH: "/config/qbt-rules.db"
+  QBT_RULES_QUEUE_CLEANUP_AFTER: "7d"
+
+  # qBittorrent
+  QBT_RULES_QBITTORRENT_HOST: "http://qbittorrent:8080"
+  QBT_RULES_QBITTORRENT_USERNAME: "admin"
+  QBT_RULES_QBITTORRENT_PASSWORD: "adminpass"
+  # Or use Docker secret:
+  # QBT_RULES_QBITTORRENT_PASSWORD_FILE: "/run/secrets/qbt_password"
+
+  # Logging
+  LOG_LEVEL: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  TRACE_MODE: "false"
+```
+
+### Docker Secrets (Recommended)
+
+```yaml
+services:
+  qbt-rules:
+    environment:
+      QBT_RULES_SERVER_API_KEY_FILE: "/run/secrets/api_key"
+      QBT_RULES_QBITTORRENT_PASSWORD_FILE: "/run/secrets/qbt_password"
+    secrets:
+      - api_key
+      - qbt_password
+
+secrets:
+  api_key:
+    file: ./secrets/api_key.txt
+  qbt_password:
+    file: ./secrets/qbt_password.txt
+```
+
+📖 **[Configuration Reference](config/config.default.yml)**
 
 ---
 
 ## Example Rules
 
-### Auto-Categorize by Content Type
+### Auto-Categorize TV Shows
 
 ```yaml
 - name: "Categorize TV shows"
   enabled: true
-  stop_on_match: true
+  context: torrent-imported
   conditions:
-    trigger: on_added
     all:
       - field: info.name
         operator: matches
@@ -289,253 +573,97 @@ Execute one or more actions when conditions match:
         category: "TV-Shows"
 ```
 
-### Cleanup Old Completed Torrents
+### Delete Old Completed Torrents
 
 ```yaml
 - name: "Delete old seeded torrents"
   enabled: true
+  context: weekly-cleanup
   conditions:
-    trigger: scheduled
     all:
-      - field: info.state
-        operator: in
-        value: ["uploading", "pausedUP", "stalledUP"]
       - field: info.completion_on
         operator: older_than
-        value: "30 days"  # Human-readable duration
+        value: "30 days"
       - field: info.ratio
         operator: ">="
         value: 2.0
+    none:
+      - field: info.category
+        operator: in
+        value: [keep, seedbox]
   actions:
     - type: delete_torrent
       params:
-        delete_files: false
-```
-
-### Force Seed Low-Seeded Content
-
-```yaml
-- name: "Force start underseded torrents"
-  enabled: true
-  conditions:
-    trigger: scheduled
-    all:
-      - field: info.num_complete
-        operator: "<="
-        value: 2
-      - field: info.state
-        operator: in
-        value: ["pausedUP", "stalledUP"]
-  actions:
-    - type: force_start
+        keep_files: true
 ```
 
 ### Pause Large Downloads
 
 ```yaml
-- name: "Pause very large downloads"
+- name: "Pause large downloads during daytime"
   enabled: true
+  context: weekly-cleanup
   conditions:
-    trigger: on_added
     all:
       - field: info.size
         operator: larger_than
         value: "50 GB"
       - field: info.state
-        operator: in
-        value: ["downloading", "metaDL"]
+        operator: contains
+        value: "DL"
   actions:
     - type: stop
     - type: add_tag
       params:
-        tag: "large-download"
+        tags:
+          - large-download-paused
 ```
 
-**[📖 More Examples](https://github.com/andronics/qbt-rules/wiki/Examples)**
-
----
-
-## Deployment
-
-### Scheduled Execution with Cron
-
-```bash
-# Run every hour
-0 * * * * qbt-rules --trigger scheduled
-
-# Run daily at 3 AM
-0 3 * * * qbt-rules --trigger scheduled
-
-# Custom trigger at midnight
-0 0 * * * qbt-rules --trigger nightly_cleanup
-```
-
-### Systemd Timer
-
-**Option 1: Single Timer (Simple)**
-
-Create `/etc/systemd/system/qbt-rules.service`:
-
-```ini
-[Unit]
-Description=qbt-rules - qBittorrent Automation
-After=network.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/qbt-rules --trigger scheduled
-User=qbittorrent
-Environment="PATH=/usr/local/bin:/usr/bin:/bin"
-```
-
-Create `/etc/systemd/system/qbt-rules.timer`:
-
-```ini
-[Unit]
-Description=Run qbt-rules hourly
-
-[Timer]
-OnCalendar=hourly
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-Enable:
-```bash
-sudo systemctl enable qbt-rules.timer
-sudo systemctl start qbt-rules.timer
-```
-
-**Option 2: Template Service (Multiple Triggers)**
-
-For running different triggers on different schedules, use systemd templates.
-
-Create `/etc/systemd/system/qbt-rules@.service`:
-
-```ini
-[Unit]
-Description=qbt-rules - %i trigger
-After=network.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/qbt-rules --trigger %i
-User=qbittorrent
-Environment="PATH=/usr/local/bin:/usr/bin:/bin"
-```
-
-Create multiple timer files for different triggers:
-
-`/etc/systemd/system/qbt-rules@hourly.timer`:
-```ini
-[Unit]
-Description=Run qbt-rules hourly trigger
-
-[Timer]
-OnCalendar=hourly
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-`/etc/systemd/system/qbt-rules@nightly.timer`:
-```ini
-[Unit]
-Description=Run qbt-rules nightly trigger
-
-[Timer]
-OnCalendar=daily
-OnCalendar=03:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-`/etc/systemd/system/qbt-rules@weekly.timer`:
-```ini
-[Unit]
-Description=Run qbt-rules weekly trigger
-
-[Timer]
-OnCalendar=weekly
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-Enable the timers you need:
-```bash
-# Enable hourly trigger
-sudo systemctl enable qbt-rules@hourly.timer
-sudo systemctl start qbt-rules@hourly.timer
-
-# Enable nightly trigger
-sudo systemctl enable qbt-rules@nightly.timer
-sudo systemctl start qbt-rules@nightly.timer
-
-# Enable weekly trigger
-sudo systemctl enable qbt-rules@weekly.timer
-sudo systemctl start qbt-rules@weekly.timer
-
-# Check timer status
-sudo systemctl list-timers qbt-rules@*
-```
-
-### Docker
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install the package
-RUN pip install qbt-rules
-
-# Copy configuration files
-COPY config/ /app/config/
-
-# Run scheduled trigger every hour
-CMD ["sh", "-c", "while true; do qbt-rules --trigger scheduled; sleep 3600; done"]
-```
-
-**[📖 Deployment Guide](https://github.com/andronics/qbt-rules/wiki/Deployment)**
+📖 **[More Examples](config/rules.default.yml)**
 
 ---
 
 ## Documentation
 
-**Complete documentation is available on the [GitHub Wiki](https://github.com/andronics/qbt-rules/wiki):**
+- **[Architecture Documentation](docs/Architecture.md)** - System design and components
+- **[API Reference](docs/API.md)** - Complete HTTP API documentation
+- **[Docker Deployment Guide](docs/Docker.md)** - Container setup and examples
+- **[Configuration Examples](config/config.default.yml)** - Server/client/queue config
+- **[Rules Examples](config/rules.default.yml)** - Comprehensive rule examples
 
-- **[Getting Started](https://github.com/andronics/qbt-rules/wiki/Quick-Start)** - Installation and first rule
-- **[Configuration Reference](https://github.com/andronics/qbt-rules/wiki/Configuration)** - config.yml and rules.yml
-- **[Rules Architecture](https://github.com/andronics/qbt-rules/wiki/Rules-Architecture)** - How rules are evaluated
-- **[Triggers](https://github.com/andronics/qbt-rules/wiki/Triggers)** - Manual, scheduled, webhooks
-- **[Conditions](https://github.com/andronics/qbt-rules/wiki/Conditions)** - Operators and logical groups
-- **[Available Fields](https://github.com/andronics/qbt-rules/wiki/Available-Fields)** - Complete field reference
-- **[Actions](https://github.com/andronics/qbt-rules/wiki/Actions)** - All available actions
-- **[Examples](https://github.com/andronics/qbt-rules/wiki/Examples)** - Real-world use cases
-- **[FAQ](https://github.com/andronics/qbt-rules/wiki/FAQ)** - Common questions
-- **[Troubleshooting](https://github.com/andronics/qbt-rules/wiki/Troubleshooting)** - Debug and fix issues
-- **[Advanced Topics](https://github.com/andronics/qbt-rules/wiki/Advanced-Topics)** - Performance, security, extending
+---
+
+## Migration from v0.3.x
+
+qbt-rules v0.4.0 introduces breaking changes:
+
+### Key Changes
+
+1. **Distribution**: PyPI package → Docker images (ghcr.io)
+2. **Architecture**: Standalone CLI → Client-server with HTTP API
+3. **Terminology**: `trigger` → `context` (backward compatible flags exist)
+4. **Execution**: Direct execution → Queue-based job processing
+
+### Migration Steps
+
+1. **Rules File**: No changes needed (rules.yml syntax unchanged)
+2. **Config File**: Update structure (see config.default.yml)
+3. **Deployment**: Replace cron/systemd with Docker Compose + webhooks/cron container
+4. **CLI Usage**: Update to use HTTP API or client mode
+
+### Backward Compatibility
+
+- Rules syntax unchanged (only `trigger:` → `context:`)
+- CLI flag `--trigger` mapped to `--context` automatically
+- PyPI package v0.3.x remains available (deprecated)
 
 ---
 
 ## Requirements
 
-- **Python 3.8+**
-- **qBittorrent v5.0+** with Web UI enabled
-- **Dependencies:** `requests`, `pyyaml`
-
----
-
-## Contributing
-
-Contributions are welcome! Please see the [Contributing Guide](https://github.com/andronics/qbt-rules/wiki/Contributing) on the wiki.
+- **Docker** and **Docker Compose**
+- **qBittorrent v4.1+** with Web UI enabled
+- **Optional:** Redis server (for high-performance queue backend)
 
 ---
 
@@ -543,7 +671,19 @@ Contributions are welcome! Please see the [Contributing Guide](https://github.co
 
 See [CHANGELOG.md](CHANGELOG.md) for version history and release notes.
 
-**Latest Release:** [v0.3.0](https://github.com/andronics/qbt-rules/releases/tag/v0.3.0) - 2024-12-13
+**Latest Release:** [v0.4.0](https://github.com/andronics/qbt-rules/releases/tag/v0.4.0) - 2024-12-14
+
+---
+
+## Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ---
 
@@ -555,6 +695,6 @@ You are free to use, modify, and distribute this software for any purpose withou
 
 ---
 
-**Happy automating! 🚀**
+**Happy automating! 🚀🐳**
 
-For detailed documentation, visit the [GitHub Wiki](https://github.com/andronics/qbt-rules/wiki).
+For complete documentation, see [docs/](docs/).
