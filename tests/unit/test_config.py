@@ -2,6 +2,7 @@
 
 import pytest
 import os
+import logging
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -904,6 +905,126 @@ logging:
         assert isinstance(rules, list)
         assert len(rules) > 0
         assert 'name' in rules[0]
+
+    def test_get_rules_hot_reload_when_file_modified(self, tmp_path):
+        """Should reload rules when file is modified."""
+        import time
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        # Create initial rules
+        rules_file = config_dir / "rules.yml"
+        rules_file.write_text("""
+rules:
+  - name: "Initial Rule"
+    conditions:
+      all: []
+    actions:
+      - type: stop
+""")
+        (config_dir / "config.yml").write_text("qbittorrent: {host: 'http://localhost:8080'}")
+
+        # Load config
+        config = Config(config_dir)
+        initial_rules = config.get_rules()
+        assert len(initial_rules) == 1
+        assert initial_rules[0]['name'] == "Initial Rule"
+
+        # Modify rules file (need to ensure mtime changes)
+        time.sleep(0.01)  # Ensure mtime difference
+        rules_file.write_text("""
+rules:
+  - name: "Updated Rule"
+    conditions:
+      all: []
+    actions:
+      - type: start
+  - name: "New Rule"
+    conditions:
+      all: []
+    actions:
+      - type: recheck
+""")
+
+        # Touch the file to update mtime
+        rules_file.touch()
+
+        # Get rules again - should reload
+        updated_rules = config.get_rules()
+        assert len(updated_rules) == 2
+        assert updated_rules[0]['name'] == "Updated Rule"
+        assert updated_rules[1]['name'] == "New Rule"
+
+    def test_get_rules_skips_reload_when_file_unchanged(self, tmp_path, mocker):
+        """Should not reload rules when file hasn't changed."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        (config_dir / "rules.yml").write_text("""
+rules:
+  - name: "Test Rule"
+    conditions:
+      all: []
+    actions:
+      - type: stop
+""")
+        (config_dir / "config.yml").write_text("qbittorrent: {host: 'http://localhost:8080'}")
+
+        config = Config(config_dir)
+
+        # Spy on _load_rules to track calls
+        load_rules_spy = mocker.spy(config, '_load_rules')
+
+        # First call - should load (mtime not set yet)
+        config.get_rules()
+        assert load_rules_spy.call_count == 1
+
+        # Second call without file modification - should NOT reload
+        config.get_rules()
+        # Should still be 1 because file hasn't changed
+        assert load_rules_spy.call_count == 1
+
+    def test_get_rules_keeps_old_rules_on_reload_error(self, tmp_path, caplog):
+        """Should keep existing rules when reload fails."""
+        import time
+
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        # Create valid initial rules
+        rules_file = config_dir / "rules.yml"
+        rules_file.write_text("""
+rules:
+  - name: "Good Rule"
+    conditions:
+      all: []
+    actions:
+      - type: stop
+""")
+        (config_dir / "config.yml").write_text("qbittorrent: {host: 'http://localhost:8080'}")
+
+        config = Config(config_dir)
+        good_rules = config.get_rules()
+        assert len(good_rules) == 1
+        assert good_rules[0]['name'] == "Good Rule"
+
+        # Corrupt the rules file
+        time.sleep(0.01)
+        rules_file.write_text("rules: {invalid yaml syntax: [unclosed bracket")
+        rules_file.touch()
+
+        # Try to get rules - should keep old rules and log warning
+        with caplog.at_level(logging.WARNING):
+            rules_after_error = config.get_rules()
+
+        # Should still have the good rules
+        assert len(rules_after_error) == 1
+        assert rules_after_error[0]['name'] == "Good Rule"
+
+        # Should have logged a warning
+        assert "Failed to reload rules" in caplog.text
+        assert "Using cached rules" in caplog.text
 
     def test_env_var_expansion_in_config(self, tmp_path):
         """Environment variables are expanded in config."""
