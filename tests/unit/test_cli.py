@@ -1,0 +1,1312 @@
+"""
+Tests for qbt_rules.cli module (v0.4.0 client-server architecture)
+"""
+
+import pytest
+from unittest.mock import Mock, patch, MagicMock, call
+from argparse import Namespace
+import json
+
+from qbt_rules.cli import (
+    get_server_config,
+    get_client_config,
+    get_queue_config,
+    run_server_mode,
+    run_client_mode,
+    wait_for_job,
+    list_jobs_command,
+    job_status_command,
+    cancel_job_command,
+    stats_command
+)
+
+
+class TestGetServerConfig:
+    """Test get_server_config() function"""
+
+    def test_returns_default_config(self):
+        """Should return default configuration when no args provided"""
+        args = Namespace()
+        config_obj = Mock(config={})
+
+        config = get_server_config(args, config_obj)
+
+        assert config['host'] == '0.0.0.0'
+        assert config['port'] == 5000
+        assert config['api_key'] is None
+        assert config['workers'] == 1
+
+    def test_uses_args_values(self):
+        """Should use CLI argument values when provided"""
+        args = Namespace(
+            server_host='127.0.0.1',
+            server_port='8000',
+            server_api_key='test-key',
+            server_workers='2'
+        )
+        config_obj = Mock(config={})
+
+        config = get_server_config(args, config_obj)
+
+        assert config['host'] == '127.0.0.1'
+        assert config['port'] == 8000
+        assert config['api_key'] == 'test-key'
+        assert config['workers'] == 2
+
+    def test_uses_config_file_values(self):
+        """Should use config file values when args not provided"""
+        args = Namespace()
+        config_obj = Mock(config={
+            'server': {
+                'host': '192.168.1.1',
+                'port': 9000,
+                'api_key': 'config-key',
+                'workers': 4
+            }
+        })
+
+        config = get_server_config(args, config_obj)
+
+        assert config['host'] == '192.168.1.1'
+        assert config['port'] == 9000
+        assert config['api_key'] == 'config-key'
+        assert config['workers'] == 4
+
+
+class TestGetClientConfig:
+    """Test get_client_config() function"""
+
+    def test_returns_default_config(self):
+        """Should return default configuration when no args provided"""
+        args = Namespace()
+        config_obj = Mock(config={})
+
+        config = get_client_config(args, config_obj)
+
+        assert config['server_url'] == 'http://localhost:5000'
+        assert config['api_key'] is None
+
+    def test_uses_args_values(self):
+        """Should use CLI argument values when provided"""
+        args = Namespace(
+            client_server_url='http://server.local:8000',
+            client_api_key='client-key'
+        )
+        config_obj = Mock(config={})
+
+        config = get_client_config(args, config_obj)
+
+        assert config['server_url'] == 'http://server.local:8000'
+        assert config['api_key'] == 'client-key'
+
+
+class TestGetQueueConfig:
+    """Test get_queue_config() function"""
+
+    def test_returns_default_config(self):
+        """Should return default configuration when no args provided"""
+        args = Namespace()
+        config_obj = Mock(config={})
+
+        config = get_queue_config(args, config_obj)
+
+        assert config['backend'] == 'sqlite'
+        assert config['sqlite_path'] == '/config/qbt-rules.db'
+        assert config['redis_url'] == 'redis://localhost:6379/0'
+
+    def test_uses_args_values(self):
+        """Should use CLI argument values when provided"""
+        args = Namespace(
+            queue_backend='redis',
+            queue_sqlite_path='/tmp/test.db',
+            queue_redis_url='redis://redis:6379/1'
+        )
+        config_obj = Mock(config={})
+
+        config = get_queue_config(args, config_obj)
+
+        assert config['backend'] == 'redis'
+        assert config['sqlite_path'] == '/tmp/test.db'
+        assert config['redis_url'] == 'redis://redis:6379/1'
+
+
+class TestRunServerMode:
+    """Test run_server_mode() function"""
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.server.run_server')
+    @patch('qbt_rules.server.create_app')
+    @patch('qbt_rules.worker.Worker')
+    @patch('qbt_rules.queue_manager.create_queue')
+    @patch('qbt_rules.cli.QBittorrentAPI')
+    def test_creates_and_runs_server(self, mock_api_class, mock_create_queue,
+                                     mock_worker_class, mock_create_app,
+                                     mock_run_server, mock_logger):
+        """Should create Flask app and run server"""
+        # Setup mocks
+        mock_queue = Mock()
+        mock_queue.__class__.__name__ = 'SQLiteQueue'
+        mock_create_queue.return_value = mock_queue
+
+        mock_api = Mock()
+        mock_api_class.return_value = mock_api
+
+        mock_worker = Mock()
+        mock_worker_class.return_value = mock_worker
+
+        mock_app = Mock()
+        mock_create_app.return_value = mock_app
+
+        args = Namespace(
+            serve=True,
+            server_host='0.0.0.0',
+            server_port=5000,
+            server_api_key='test-key',
+            server_workers=1,
+            queue_backend='sqlite',
+            queue_sqlite_path='/tmp/test.db',
+            queue_redis_url=None
+        )
+        config_obj = Mock(config={})
+        config_obj.get_qbittorrent_config.return_value = {
+            'host': 'http://localhost:8080',
+            'user': 'admin',
+            'pass': 'password'
+        }
+        config_obj.get.return_value = False  # logging.http_access defaults to False
+
+        run_server_mode(args, config_obj)
+
+        # Verify queue creation
+        mock_create_queue.assert_called_once_with(
+            backend='sqlite',
+            db_path='/tmp/test.db',
+            redis_url='redis://localhost:6379/0'  # Default value
+        )
+
+        # Verify API initialization
+        mock_api_class.assert_called_once_with(
+            host='http://localhost:8080',
+            username='admin',
+            password='password',
+            connect_now=False
+        )
+
+        # Verify worker initialization
+        mock_worker_class.assert_called_once_with(
+            queue=mock_queue,
+            api=mock_api,
+            config=config_obj
+        )
+        mock_worker.start.assert_called_once()
+
+        # Verify Flask app creation
+        mock_create_app.assert_called_once_with(
+            queue_manager=mock_queue,
+            worker_instance=mock_worker,
+            api_key='test-key'
+        )
+
+        # Verify server run
+        mock_run_server.assert_called_once_with(
+            app=mock_app,
+            host='0.0.0.0',
+            port=5000,
+            workers=1,
+            log_http_access=False
+        )
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    def test_exits_without_api_key(self, mock_exit, mock_logger):
+        """Should exit if server API key not provided"""
+        # Make sys.exit raise SystemExit to stop execution
+        mock_exit.side_effect = SystemExit(1)
+
+        args = Namespace(
+            server_host='0.0.0.0',
+            server_port=5000,
+            server_api_key=None,  # No API key
+            server_workers=1
+        )
+        config_obj = Mock(config={})
+
+        with pytest.raises(SystemExit):
+            run_server_mode(args, config_obj)
+
+        mock_exit.assert_called_once_with(1)
+        # Verify error was logged
+        assert mock_logger.error.called
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.server.run_server')
+    @patch('qbt_rules.server.create_app')
+    @patch('qbt_rules.worker.Worker')
+    @patch('qbt_rules.queue_manager.create_queue')
+    @patch('qbt_rules.cli.QBittorrentAPI')
+    def test_stops_worker_on_keyboard_interrupt(self, mock_api_class, mock_create_queue,
+                                                 mock_worker_class, mock_create_app,
+                                                 mock_run_server, mock_logger):
+        """Should stop worker when KeyboardInterrupt is raised"""
+        mock_queue = Mock()
+        mock_queue.__class__.__name__ = 'SQLiteQueue'
+        mock_create_queue.return_value = mock_queue
+
+        mock_api = Mock()
+        mock_api_class.return_value = mock_api
+
+        mock_worker = Mock()
+        mock_worker_class.return_value = mock_worker
+
+        mock_app = Mock()
+        mock_create_app.return_value = mock_app
+
+        # Simulate KeyboardInterrupt
+        mock_run_server.side_effect = KeyboardInterrupt()
+
+        args = Namespace(
+            server_host='0.0.0.0',
+            server_port=5000,
+            server_api_key='test-key',
+            server_workers=1,
+            queue_backend='sqlite',
+            queue_sqlite_path='/tmp/test.db',
+            queue_redis_url=None
+        )
+        config_obj = Mock(config={})
+        config_obj.get_qbittorrent_config.return_value = {
+            'host': 'http://localhost:8080',
+            'user': 'admin',
+            'pass': 'password'
+        }
+
+        run_server_mode(args, config_obj)
+
+        # Verify worker was stopped
+        mock_worker.stop.assert_called_once()
+
+
+class TestRunClientMode:
+    """Test run_client_mode() function"""
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.validate_torrent_hash')
+    @patch('qbt_rules.cli.requests.post')
+    def test_submits_job_successfully(self, mock_post, mock_validate, mock_logger):
+        """Should submit job to server successfully"""
+        # Mock hash validation
+        mock_validate.return_value = 'abc123'
+
+        # Mock successful response
+        mock_response = Mock()
+        mock_response.status_code = 202
+        mock_response.json.return_value = {
+            'job_id': 'job-123',
+            'status': 'pending',
+            'created_at': '2024-01-01T00:00:00Z'
+        }
+        mock_post.return_value = mock_response
+
+        args = Namespace(
+            context='adhoc-run',
+            hash='abc123',
+            wait=False,
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        run_client_mode(args, config_obj)
+
+        # Verify hash was validated
+        mock_validate.assert_called_once_with('abc123')
+
+        # Verify request was made
+        mock_post.assert_called_once()
+        call_args = mock_post.call_args
+        assert call_args[0][0] == 'http://localhost:5000/api/execute'
+        assert call_args[1]['params']['context'] == 'adhoc-run'
+        assert call_args[1]['params']['hash'] == 'abc123'
+        assert call_args[1]['params']['key'] == 'test-key'
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.validate_torrent_hash')
+    @patch('qbt_rules.cli.requests.post')
+    def test_handles_connection_error(self, mock_post, mock_validate, mock_exit, mock_logger):
+        """Should handle connection errors gracefully"""
+        import requests
+        mock_post.side_effect = requests.exceptions.ConnectionError()
+        mock_exit.side_effect = SystemExit(1)
+        mock_validate.return_value = 'abc123'
+
+        args = Namespace(
+            context='adhoc-run',
+            hash='abc123',
+            wait=False,
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        with pytest.raises(SystemExit):
+            run_client_mode(args, config_obj)
+
+        mock_exit.assert_called_once_with(1)
+        # Verify error was logged
+        assert mock_logger.error.called
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    def test_exits_without_api_key(self, mock_exit, mock_logger):
+        """Should exit if client API key not provided"""
+        mock_exit.side_effect = SystemExit(1)
+
+        args = Namespace(
+            context='adhoc-run',
+            hash='abc123',
+            wait=False,
+            client_server_url='http://localhost:5000',
+            client_api_key=None  # No API key
+        )
+        config_obj = Mock(config={})
+
+        with pytest.raises(SystemExit):
+            run_client_mode(args, config_obj)
+
+        mock_exit.assert_called_once_with(1)
+        # Verify error was logged
+        assert mock_logger.error.called
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.validate_torrent_hash')
+    @patch('qbt_rules.cli.requests.post')
+    def test_handles_auth_error(self, mock_post, mock_validate, mock_exit, mock_logger):
+        """Should handle authentication errors"""
+        mock_response = Mock()
+        mock_response.status_code = 401
+        mock_post.return_value = mock_response
+        mock_exit.side_effect = SystemExit(1)
+        mock_validate.return_value = 'abc123'
+
+        args = Namespace(
+            context='adhoc-run',
+            hash='abc123',
+            wait=False,
+            client_server_url='http://localhost:5000',
+            client_api_key='wrong-key'
+        )
+        config_obj = Mock(config={})
+
+        with pytest.raises(SystemExit):
+            run_client_mode(args, config_obj)
+
+        mock_exit.assert_called_once_with(1)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.validate_torrent_hash')
+    @patch('qbt_rules.cli.wait_for_job')
+    @patch('qbt_rules.cli.requests.post')
+    def test_waits_for_job_when_requested(self, mock_post, mock_wait, mock_validate, mock_logger):
+        """Should wait for job completion when --wait flag is set"""
+        mock_response = Mock()
+        mock_response.status_code = 202
+        mock_response.json.return_value = {
+            'job_id': 'job-123',
+            'status': 'pending',
+            'created_at': '2024-01-01T00:00:00Z'
+        }
+        mock_post.return_value = mock_response
+        mock_validate.return_value = 'abc123'
+
+        args = Namespace(
+            context='adhoc-run',
+            hash='abc123',
+            wait=True,  # Wait for completion
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        run_client_mode(args, config_obj)
+
+        # Verify wait_for_job was called
+        mock_wait.assert_called_once_with(
+            'http://localhost:5000',
+            'test-key',
+            'job-123'
+        )
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.validate_torrent_hash')
+    @patch('qbt_rules.cli.requests.post')
+    def test_handles_timeout_error(self, mock_post, mock_validate, mock_exit, mock_logger):
+        """Should handle timeout errors"""
+        import requests
+        mock_post.side_effect = requests.exceptions.Timeout()
+        mock_exit.side_effect = SystemExit(1)
+        mock_validate.return_value = 'abc123'
+
+        args = Namespace(
+            context='adhoc-run',
+            hash='abc123',
+            wait=False,
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        with pytest.raises(SystemExit):
+            run_client_mode(args, config_obj)
+
+        mock_exit.assert_called_once_with(1)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.validate_torrent_hash')
+    @patch('qbt_rules.cli.requests.post')
+    def test_handles_server_error(self, mock_post, mock_validate, mock_exit, mock_logger):
+        """Should handle server errors"""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.text = 'Internal Server Error'
+        mock_post.return_value = mock_response
+        mock_exit.side_effect = SystemExit(1)
+        mock_validate.return_value = 'abc123'
+
+        args = Namespace(
+            context='adhoc-run',
+            hash='abc123',
+            wait=False,
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        with pytest.raises(SystemExit):
+            run_client_mode(args, config_obj)
+
+        mock_exit.assert_called_once_with(1)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.post')
+    def test_handles_no_context_or_hash(self, mock_post, mock_logger):
+        """Should handle missing context and hash"""
+        mock_response = Mock()
+        mock_response.status_code = 202
+        mock_response.json.return_value = {
+            'job_id': 'job-123',
+            'status': 'pending',
+            'created_at': '2024-01-01T00:00:00Z'
+        }
+        mock_post.return_value = mock_response
+
+        args = Namespace(
+            wait=False,
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        run_client_mode(args, config_obj)
+
+        # Verify request was made with None values
+        call_args = mock_post.call_args
+        assert call_args[1]['params']['context'] is None
+        assert call_args[1]['params']['hash'] is None
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.validate_torrent_hash')
+    @patch('qbt_rules.cli.requests.post')
+    def test_validates_torrent_hash_when_provided(self, mock_post, mock_validate, mock_exit, mock_logger):
+        """Should validate torrent hash when provided"""
+        # Simulate validation error
+        mock_validate.side_effect = ValueError("Invalid hash")
+        mock_exit.side_effect = SystemExit(1)
+
+        args = Namespace(
+            context='adhoc-run',
+            hash='invalid-hash',
+            wait=False,
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        with pytest.raises(SystemExit):
+            run_client_mode(args, config_obj)
+
+        # Should have attempted validation
+        mock_validate.assert_called_once_with('invalid-hash')
+        # Should have exited
+        mock_exit.assert_called_once_with(1)
+
+
+class TestWaitForJob:
+    """Test wait_for_job() function"""
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.time.sleep')
+    @patch('qbt_rules.cli.requests.get')
+    def test_waits_for_job_completion(self, mock_get, mock_sleep, mock_logger):
+        """Should poll until job completes"""
+        # First call: processing, second call: completed
+        mock_response1 = Mock()
+        mock_response1.status_code = 200
+        mock_response1.json.return_value = {'status': 'processing'}
+
+        mock_response2 = Mock()
+        mock_response2.status_code = 200
+        mock_response2.json.return_value = {
+            'status': 'completed',
+            'result': {
+                'torrents_processed': 10,
+                'rules_matched': 5,
+                'actions_executed': 3
+            }
+        }
+
+        mock_get.side_effect = [mock_response1, mock_response2]
+
+        wait_for_job('http://localhost:5000', 'test-key', 'job-123')
+
+        assert mock_get.call_count == 2
+        mock_sleep.assert_called_once()
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.time.sleep')
+    @patch('qbt_rules.cli.requests.get')
+    def test_shows_error_on_failure(self, mock_get, mock_sleep, mock_exit, mock_logger):
+        """Should show error when job fails"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'status': 'failed',
+            'error': 'Test error'
+        }
+        mock_get.return_value = mock_response
+        mock_exit.side_effect = SystemExit(1)
+
+        with pytest.raises(SystemExit):
+            wait_for_job('http://localhost:5000', 'test-key', 'job-123')
+
+        # Should not retry for failed job
+        assert mock_get.call_count == 1
+        mock_exit.assert_called_once_with(1)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.time.sleep')
+    @patch('qbt_rules.cli.requests.get')
+    def test_handles_cancelled_job(self, mock_get, mock_sleep, mock_exit, mock_logger):
+        """Should handle cancelled jobs"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'status': 'cancelled'}
+        mock_get.return_value = mock_response
+        mock_exit.side_effect = SystemExit(1)
+
+        with pytest.raises(SystemExit):
+            wait_for_job('http://localhost:5000', 'test-key', 'job-123')
+
+        mock_exit.assert_called_once_with(1)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.time.sleep')
+    @patch('qbt_rules.cli.requests.get')
+    def test_handles_polling_error(self, mock_get, mock_sleep, mock_exit, mock_logger):
+        """Should handle errors during polling"""
+        mock_get.side_effect = Exception("Network error")
+        mock_exit.side_effect = SystemExit(1)
+
+        with pytest.raises(SystemExit):
+            wait_for_job('http://localhost:5000', 'test-key', 'job-123')
+
+        mock_exit.assert_called_once_with(1)
+
+
+class TestListJobsCommand:
+    """Test list_jobs_command() function"""
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.get')
+    def test_lists_jobs_successfully(self, mock_get, mock_logger):
+        """Should list jobs from server"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'total': 2,
+            'jobs': [
+                {
+                    'job_id': 'job-1',
+                    'status': 'completed',
+                    'context': 'adhoc-run',
+                    'created_at': '2024-01-01T00:00:00Z'
+                },
+                {
+                    'job_id': 'job-2',
+                    'status': 'pending',
+                    'context': 'automatic',
+                    'created_at': '2024-01-01T01:00:00Z'
+                }
+            ]
+        }
+        mock_get.return_value = mock_response
+
+        args = Namespace(
+            status_filter=None,
+            limit=20,
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        list_jobs_command(args, config_obj)
+
+        # Verify request was made
+        mock_get.assert_called_once()
+        call_args = mock_get.call_args
+        assert 'http://localhost:5000/api/jobs' in call_args[0][0]
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.get')
+    def test_handles_no_jobs(self, mock_get, mock_logger):
+        """Should handle empty job list"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'total': 0,
+            'jobs': []
+        }
+        mock_get.return_value = mock_response
+
+        args = Namespace(
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        list_jobs_command(args, config_obj)
+
+        # Verify "No jobs found" was logged
+        assert any('No jobs found' in str(call) for call in mock_logger.info.call_args_list)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.requests.get')
+    def test_handles_error(self, mock_get, mock_exit, mock_logger):
+        """Should handle errors"""
+        mock_get.side_effect = Exception("Network error")
+
+        args = Namespace(
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        list_jobs_command(args, config_obj)
+
+        mock_exit.assert_called_once_with(1)
+
+
+class TestJobStatusCommand:
+    """Test job_status_command() function"""
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.get')
+    def test_gets_job_status(self, mock_get, mock_logger):
+        """Should get job status from server"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'job_id': 'job-123',
+            'status': 'completed',
+            'context': 'adhoc-run',
+            'hash': 'abc123',
+            'created_at': '2024-01-01T00:00:00Z',
+            'started_at': '2024-01-01T00:00:01Z',
+            'completed_at': '2024-01-01T00:00:10Z',
+            'result': {
+                'torrents_processed': 10
+            }
+        }
+        mock_get.return_value = mock_response
+
+        args = Namespace(
+            job_id='job-123',
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        job_status_command(args, config_obj)
+
+        # Verify request was made
+        mock_get.assert_called_once()
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.get')
+    def test_handles_job_not_found(self, mock_get, mock_logger):
+        """Should handle job not found"""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_get.return_value = mock_response
+
+        args = Namespace(
+            job_id='nonexistent',
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        job_status_command(args, config_obj)
+
+        # Verify error was logged
+        assert any('Job not found' in str(call) for call in mock_logger.error.call_args_list)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.requests.get')
+    def test_handles_error(self, mock_get, mock_exit, mock_logger):
+        """Should handle errors"""
+        mock_get.side_effect = Exception("Network error")
+
+        args = Namespace(
+            job_id='job-123',
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        job_status_command(args, config_obj)
+
+        mock_exit.assert_called_once_with(1)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.get')
+    def test_displays_job_with_error(self, mock_get, mock_logger):
+        """Should display job with error"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'job_id': 'job-123',
+            'status': 'failed',
+            'context': 'adhoc-run',
+            'created_at': '2024-01-01T00:00:00Z',
+            'started_at': '2024-01-01T00:00:01Z',
+            'completed_at': '2024-01-01T00:00:10Z',
+            'error': 'Connection timeout'
+        }
+        mock_get.return_value = mock_response
+
+        args = Namespace(
+            job_id='job-123',
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        job_status_command(args, config_obj)
+
+        # Verify error was logged
+        assert any('Error' in str(call) or 'error' in str(call) for call in mock_logger.info.call_args_list)
+
+
+class TestCancelJobCommand:
+    """Test cancel_job_command() function"""
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.delete')
+    def test_cancels_job(self, mock_delete, mock_logger):
+        """Should cancel job on server"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_delete.return_value = mock_response
+
+        args = Namespace(
+            cancel_job_id='job-123',
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        cancel_job_command(args, config_obj)
+
+        # Verify request was made
+        mock_delete.assert_called_once()
+        # Verify success was logged
+        assert any('Job cancelled' in str(call) for call in mock_logger.info.call_args_list)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.delete')
+    def test_handles_cannot_cancel(self, mock_delete, mock_logger):
+        """Should handle cannot cancel error"""
+        mock_response = Mock()
+        mock_response.status_code = 400
+        mock_response.json.return_value = {
+            'message': 'Job already completed'
+        }
+        mock_delete.return_value = mock_response
+
+        args = Namespace(
+            cancel_job_id='job-123',
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        cancel_job_command(args, config_obj)
+
+        # Verify error was logged
+        assert any('Cannot cancel job' in str(call) for call in mock_logger.error.call_args_list)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.delete')
+    def test_handles_job_not_found(self, mock_delete, mock_logger):
+        """Should handle job not found"""
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_delete.return_value = mock_response
+
+        args = Namespace(
+            cancel_job_id='nonexistent',
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        cancel_job_command(args, config_obj)
+
+        # Verify error was logged
+        assert any('Job not found' in str(call) for call in mock_logger.error.call_args_list)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.requests.delete')
+    def test_handles_error(self, mock_delete, mock_exit, mock_logger):
+        """Should handle errors"""
+        mock_delete.side_effect = Exception("Network error")
+
+        args = Namespace(
+            cancel_job_id='job-123',
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        cancel_job_command(args, config_obj)
+
+        mock_exit.assert_called_once_with(1)
+
+
+class TestStatsCommand:
+    """Test stats_command() function"""
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.get')
+    def test_gets_stats(self, mock_get, mock_logger):
+        """Should get server stats"""
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            'jobs': {
+                'total': 100,
+                'pending': 5,
+                'processing': 1,
+                'completed': 90,
+                'failed': 3,
+                'cancelled': 1
+            },
+            'performance': {
+                'average_execution_time': 2.5
+            },
+            'queue': {
+                'backend': 'SQLite',
+                'depth': 5
+            },
+            'worker': {
+                'status': 'idle',
+                'last_job_completed': '2024-01-01T00:00:00Z'
+            }
+        }
+        mock_get.return_value = mock_response
+
+        args = Namespace(
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        stats_command(args, config_obj)
+
+        # Verify request was made
+        mock_get.assert_called_once()
+        # Verify stats were logged
+        assert mock_logger.info.called
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.get')
+    def test_handles_server_error(self, mock_get, mock_logger):
+        """Should handle server errors"""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_get.return_value = mock_response
+
+        args = Namespace(
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        stats_command(args, config_obj)
+
+        # Verify error was logged
+        assert any('Server error' in str(call) for call in mock_logger.error.call_args_list)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.requests.get')
+    def test_handles_error(self, mock_get, mock_exit, mock_logger):
+        """Should handle errors"""
+        mock_get.side_effect = Exception("Network error")
+
+        args = Namespace(
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        stats_command(args, config_obj)
+
+        mock_exit.assert_called_once_with(1)
+
+
+class TestRunClientModeEdgeCases:
+    """Test edge cases in run_client_mode() function"""
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.validate_torrent_hash')
+    @patch('qbt_rules.cli.requests.post')
+    def test_handles_generic_exception(self, mock_post, mock_validate, mock_exit, mock_logger):
+        """Should handle generic exceptions"""
+        mock_validate.return_value = 'abc123'
+        mock_post.side_effect = RuntimeError("Unexpected error")
+        mock_exit.side_effect = SystemExit(1)
+
+        args = Namespace(
+            context='adhoc-run',
+            hash='abc123',
+            wait=False,
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        with pytest.raises(SystemExit):
+            run_client_mode(args, config_obj)
+
+        mock_exit.assert_called_once_with(1)
+        # Verify error was logged
+        assert any('Unexpected error' in str(call) for call in mock_logger.error.call_args_list)
+
+
+class TestWaitForJobEdgeCases:
+    """Test edge cases in wait_for_job() function"""
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.sys.exit')
+    @patch('qbt_rules.cli.time.sleep')
+    @patch('qbt_rules.cli.requests.get')
+    def test_handles_timeout(self, mock_get, mock_sleep, mock_exit, mock_logger):
+        """Should timeout if job doesn't complete within max_wait"""
+        # Always return processing status
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'status': 'processing'}
+        mock_get.return_value = mock_response
+        mock_exit.side_effect = SystemExit(1)
+
+        with pytest.raises(SystemExit):
+            wait_for_job('http://localhost:5000', 'test-key', 'job-123')
+
+        # Should have called many times (polling)
+        assert mock_get.call_count > 10
+        mock_exit.assert_called_once_with(1)
+        # Verify timeout error was logged
+        assert any('did not complete' in str(call) for call in mock_logger.error.call_args_list)
+
+
+class TestCommandEdgeCases:
+    """Test edge cases in command functions"""
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.get')
+    def test_list_jobs_server_error(self, mock_get, mock_logger):
+        """Should handle server errors in list_jobs_command"""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_get.return_value = mock_response
+
+        args = Namespace(
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        list_jobs_command(args, config_obj)
+
+        # Verify server error was logged
+        assert any('Server error' in str(call) for call in mock_logger.error.call_args_list)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.get')
+    def test_job_status_server_error(self, mock_get, mock_logger):
+        """Should handle server errors in job_status_command"""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_get.return_value = mock_response
+
+        args = Namespace(
+            job_id='job-123',
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        job_status_command(args, config_obj)
+
+        # Verify server error was logged
+        assert any('Server error' in str(call) for call in mock_logger.error.call_args_list)
+
+    @patch('qbt_rules.cli.logger')
+    @patch('qbt_rules.cli.requests.delete')
+    def test_cancel_job_server_error(self, mock_delete, mock_logger):
+        """Should handle server errors in cancel_job_command"""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_delete.return_value = mock_response
+
+        args = Namespace(
+            cancel_job_id='job-123',
+            client_server_url='http://localhost:5000',
+            client_api_key='test-key'
+        )
+        config_obj = Mock(config={})
+
+        cancel_job_command(args, config_obj)
+
+        # Verify server error was logged
+        assert any('Server error' in str(call) for call in mock_logger.error.call_args_list)
+
+
+class TestMain:
+    """Test main() entry point function"""
+
+    @patch('qbt_rules.cli.sys.argv', ['qbt-rules', '--serve'])
+    @patch('qbt_rules.cli.run_server_mode')
+    @patch('qbt_rules.arguments.handle_utility_args')
+    @patch('qbt_rules.cli.get_logger')
+    @patch('qbt_rules.cli.setup_logging')
+    @patch('qbt_rules.cli.load_config')
+    @patch('qbt_rules.arguments.process_args')
+    @patch('qbt_rules.cli.sys.exit')
+    def test_main_server_mode(self, mock_exit, mock_process_args,
+                               mock_load_config, mock_setup_logging, mock_get_logger,
+                               mock_handle_utility, mock_run_server):
+        """Should run in server mode when --serve flag provided"""
+        mock_process_args.return_value = '/config'
+
+        mock_config = Mock()
+        mock_config.get_trace_mode.return_value = False
+        mock_load_config.return_value = mock_config
+
+        mock_logger = Mock()
+        mock_get_logger.return_value = mock_logger
+
+        mock_handle_utility.return_value = False
+
+        from qbt_rules.cli import main
+        main()
+
+        assert mock_run_server.called
+        mock_exit.assert_called_with(0)
+
+    @patch('qbt_rules.cli.sys.argv', ['qbt-rules', '--list-jobs'])
+    @patch('qbt_rules.cli.list_jobs_command')
+    @patch('qbt_rules.arguments.handle_utility_args')
+    @patch('qbt_rules.cli.get_logger')
+    @patch('qbt_rules.cli.setup_logging')
+    @patch('qbt_rules.cli.load_config')
+    @patch('qbt_rules.arguments.process_args')
+    @patch('qbt_rules.cli.sys.exit')
+    def test_main_list_jobs_mode(self, mock_exit, mock_process_args,
+                                  mock_load_config, mock_setup_logging, mock_get_logger,
+                                  mock_handle_utility, mock_list_jobs):
+        """Should run list_jobs command"""
+        mock_process_args.return_value = '/config'
+
+        mock_config = Mock()
+        mock_config.get_trace_mode.return_value = False
+        mock_load_config.return_value = mock_config
+
+        mock_logger = Mock()
+        mock_get_logger.return_value = mock_logger
+
+        mock_handle_utility.return_value = False
+
+        from qbt_rules.cli import main
+        main()
+
+        assert mock_list_jobs.called
+        mock_exit.assert_called_with(0)
+
+    @patch('qbt_rules.cli.sys.argv', ['qbt-rules', '--job-status', 'job-123'])
+    @patch('qbt_rules.cli.job_status_command')
+    @patch('qbt_rules.arguments.handle_utility_args')
+    @patch('qbt_rules.cli.get_logger')
+    @patch('qbt_rules.cli.setup_logging')
+    @patch('qbt_rules.cli.load_config')
+    @patch('qbt_rules.arguments.process_args')
+    @patch('qbt_rules.cli.sys.exit')
+    def test_main_job_status_mode(self, mock_exit, mock_process_args,
+                                   mock_load_config, mock_setup_logging, mock_get_logger,
+                                   mock_handle_utility, mock_job_status):
+        """Should run job_status command"""
+        mock_process_args.return_value = '/config'
+
+        mock_config = Mock()
+        mock_config.get_trace_mode.return_value = False
+        mock_load_config.return_value = mock_config
+
+        mock_logger = Mock()
+        mock_get_logger.return_value = mock_logger
+
+        mock_handle_utility.return_value = False
+
+        from qbt_rules.cli import main
+        main()
+
+        assert mock_job_status.called
+        mock_exit.assert_called_with(0)
+
+    @patch('qbt_rules.cli.sys.argv', ['qbt-rules', '--cancel-job', 'job-123'])
+    @patch('qbt_rules.cli.cancel_job_command')
+    @patch('qbt_rules.arguments.handle_utility_args')
+    @patch('qbt_rules.cli.get_logger')
+    @patch('qbt_rules.cli.setup_logging')
+    @patch('qbt_rules.cli.load_config')
+    @patch('qbt_rules.arguments.process_args')
+    @patch('qbt_rules.cli.sys.exit')
+    def test_main_cancel_job_mode(self, mock_exit, mock_process_args,
+                                   mock_load_config, mock_setup_logging, mock_get_logger,
+                                   mock_handle_utility, mock_cancel_job):
+        """Should run cancel_job command"""
+        mock_process_args.return_value = '/config'
+
+        mock_config = Mock()
+        mock_config.get_trace_mode.return_value = False
+        mock_load_config.return_value = mock_config
+
+        mock_logger = Mock()
+        mock_get_logger.return_value = mock_logger
+
+        mock_handle_utility.return_value = False
+
+        from qbt_rules.cli import main
+        main()
+
+        assert mock_cancel_job.called
+        mock_exit.assert_called_with(0)
+
+    @patch('qbt_rules.cli.sys.argv', ['qbt-rules', '--stats'])
+    @patch('qbt_rules.cli.stats_command')
+    @patch('qbt_rules.arguments.handle_utility_args')
+    @patch('qbt_rules.cli.get_logger')
+    @patch('qbt_rules.cli.setup_logging')
+    @patch('qbt_rules.cli.load_config')
+    @patch('qbt_rules.arguments.process_args')
+    @patch('qbt_rules.cli.sys.exit')
+    def test_main_stats_mode(self, mock_exit, mock_process_args,
+                              mock_load_config, mock_setup_logging, mock_get_logger,
+                              mock_handle_utility, mock_stats):
+        """Should run stats command"""
+        mock_process_args.return_value = '/config'
+
+        mock_config = Mock()
+        mock_config.get_trace_mode.return_value = False
+        mock_load_config.return_value = mock_config
+
+        mock_logger = Mock()
+        mock_get_logger.return_value = mock_logger
+
+        mock_handle_utility.return_value = False
+
+        from qbt_rules.cli import main
+        main()
+
+        assert mock_stats.called
+        mock_exit.assert_called_with(0)
+
+    @patch('qbt_rules.cli.sys.argv', ['qbt-rules', '--context', 'adhoc-run'])
+    @patch('qbt_rules.cli.run_client_mode')
+    @patch('qbt_rules.arguments.handle_utility_args')
+    @patch('qbt_rules.cli.get_logger')
+    @patch('qbt_rules.cli.setup_logging')
+    @patch('qbt_rules.cli.load_config')
+    @patch('qbt_rules.arguments.process_args')
+    @patch('qbt_rules.cli.sys.exit')
+    def test_main_client_mode(self, mock_exit, mock_process_args,
+                               mock_load_config, mock_setup_logging, mock_get_logger,
+                               mock_handle_utility, mock_run_client):
+        """Should run in client mode by default"""
+        mock_process_args.return_value = '/config'
+
+        mock_config = Mock()
+        mock_config.get_trace_mode.return_value = False
+        mock_load_config.return_value = mock_config
+
+        mock_logger = Mock()
+        mock_get_logger.return_value = mock_logger
+
+        mock_handle_utility.return_value = False
+
+        from qbt_rules.cli import main
+        main()
+
+        assert mock_run_client.called
+        mock_exit.assert_called_with(0)
+
+    @patch('qbt_rules.cli.sys.argv', ['qbt-rules', '--validate'])
+    @patch('qbt_rules.arguments.handle_utility_args')
+    @patch('qbt_rules.cli.get_logger')
+    @patch('qbt_rules.cli.setup_logging')
+    @patch('qbt_rules.cli.load_config')
+    @patch('qbt_rules.arguments.process_args')
+    @patch('qbt_rules.cli.sys.exit')
+    def test_main_utility_mode(self, mock_exit, mock_process_args,
+                                mock_load_config, mock_setup_logging, mock_get_logger,
+                                mock_handle_utility):
+        """Should handle utility arguments like --validate"""
+        mock_process_args.return_value = '/config'
+
+        mock_config = Mock()
+        mock_config.get_trace_mode.return_value = False
+        mock_load_config.return_value = mock_config
+
+        mock_logger = Mock()
+        mock_get_logger.return_value = mock_logger
+
+        # Utility mode exits early
+        mock_handle_utility.return_value = True
+
+        from qbt_rules.cli import main
+        main()
+
+        # Should have called sys.exit(0) after handling utility args
+        mock_exit.assert_called_with(0)
