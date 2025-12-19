@@ -9,8 +9,8 @@ rules:
   - name: Block unwanted archive files on add
     enabled: true
     stop_on_match: true  # Don't process other rules if matched
+    context: torrent-imported  # Context can be any custom string you define
     conditions:
-      trigger: on_added
       any:
         - field: files.name
           operator: matches
@@ -284,8 +284,8 @@ rules:
   - name: Tag torrents when encryption is required
     enabled: false
     stop_on_match: false
+    context: torrent-imported  # Context can be any custom string you define
     conditions:
-      trigger: on_added
       all:
         - field: app.encryption
           operator: ==

@@ -1,0 +1,182 @@
+# qbt-rules v0.4.0 - Configuration Settings
+#
+# This file contains all configuration for the qbt-rules client-server architecture.
+# For rules definitions, see rules.yml
+#
+# Configuration Resolution Order (highest to lowest priority):
+# 1. CLI flags (e.g., --server-port 5000)
+# 2. Environment variable _FILE variant (e.g., QBT_RULES_SERVER_API_KEY_FILE=/secrets/key)
+# 3. Environment variable (e.g., QBT_RULES_SERVER_PORT=5000)
+# 4. This config file
+# 5. Default values
+#
+# ALL environment variables support _FILE variants for secret management.
+# See PLAN.md for complete environment variable reference.
+
+# ============================================================================
+# SERVER CONFIGURATION
+# ============================================================================
+# HTTP API server settings (used when running with --serve)
+
+server:
+  # Server bind address (0.0.0.0 for all interfaces, 127.0.0.1 for localhost only)
+  # Env: QBT_RULES_SERVER_HOST or QBT_RULES_SERVER_HOST_FILE
+  host: 0.0.0.0
+
+  # Server port
+  # Env: QBT_RULES_SERVER_PORT or QBT_RULES_SERVER_PORT_FILE
+  port: 5000
+
+  # API authentication key (REQUIRED - generate with: openssl rand -hex 32)
+  # Env: QBT_RULES_SERVER_API_KEY or QBT_RULES_SERVER_API_KEY_FILE
+  # IMPORTANT: Use _FILE variant for production with Docker secrets
+  api_key: your-secure-api-key-here-generate-a-random-key
+
+  # Gunicorn worker processes (1 is sufficient for home use)
+  # Env: QBT_RULES_SERVER_WORKERS or QBT_RULES_SERVER_WORKERS_FILE
+  workers: 1
+
+# ============================================================================
+# QUEUE CONFIGURATION
+# ============================================================================
+# Job queue settings (SQLite or Redis)
+
+queue:
+  # Queue backend: 'sqlite' (default) or 'redis'
+  # Env: QBT_RULES_QUEUE_BACKEND or QBT_RULES_QUEUE_BACKEND_FILE
+  # SQLite: Zero dependencies, file-based, perfect for home users
+  # Redis: High-performance, in-memory, requires separate Redis server
+  backend: sqlite
+
+  # SQLite database path (only used when backend=sqlite)
+  # Env: QBT_RULES_QUEUE_SQLITE_PATH or QBT_RULES_QUEUE_SQLITE_PATH_FILE
+  sqlite_path: /config/qbt-rules.db
+
+  # Redis connection URL (only used when backend=redis)
+  # Env: QBT_RULES_QUEUE_REDIS_URL or QBT_RULES_QUEUE_REDIS_URL_FILE
+  # Format: redis://[:password@]host[:port][/database]
+  # redis_url: redis://localhost:6379/0
+
+  # Job retention period - how long to keep completed/failed jobs
+  # Env: QBT_RULES_QUEUE_CLEANUP_AFTER or QBT_RULES_QUEUE_CLEANUP_AFTER_FILE
+  # Format: Xd (days), Xw (weeks), or integer (seconds)
+  # Examples: '7d', '2w', '30 days', 604800
+  cleanup_after: 7d
+
+# ============================================================================
+# CLIENT CONFIGURATION
+# ============================================================================
+# CLI client settings (used when submitting jobs to server)
+
+client:
+  # Server URL for client to connect to
+  # Env: QBT_RULES_CLIENT_SERVER_URL or QBT_RULES_CLIENT_SERVER_URL_FILE
+  server_url: http://localhost:5000
+
+  # API key for client authentication (must match server.api_key)
+  # Env: QBT_RULES_CLIENT_API_KEY or QBT_RULES_CLIENT_API_KEY_FILE
+  api_key: your-secure-api-key-here-generate-a-random-key
+
+# ============================================================================
+# QBITTORRENT CONFIGURATION
+# ============================================================================
+# qBittorrent Web UI connection settings
+
+qbittorrent:
+  # qBittorrent Web UI URL
+  # Env: QBT_RULES_QBITTORRENT_HOST or QBT_RULES_QBITTORRENT_HOST_FILE
+  host: http://localhost:8080
+
+  # qBittorrent Web UI username
+  # Env: QBT_RULES_QBITTORRENT_USERNAME or QBT_RULES_QBITTORRENT_USERNAME_FILE
+  username: admin
+
+  # qBittorrent Web UI password
+  # Env: QBT_RULES_QBITTORRENT_PASSWORD or QBT_RULES_QBITTORRENT_PASSWORD_FILE
+  # IMPORTANT: Use _FILE variant for production
+  password: adminpass
+
+# ============================================================================
+# RULES CONFIGURATION
+# ============================================================================
+
+rules:
+  # Path to rules file
+  # Env: QBT_RULES_RULES_FILE or QBT_RULES_RULES_FILE_FILE
+  file: /config/rules.yml
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR
+  # Env: QBT_RULES_LOG_LEVEL or QBT_RULES_LOG_LEVEL_FILE
+  level: INFO
+
+  # Log file path (relative to CONFIG_DIR or absolute)
+  # Env: QBT_RULES_LOG_FILE or QBT_RULES_LOG_FILE_FILE
+  file: /config/qbt-rules.log
+
+  # Trace mode: Include module/function/line numbers in logs (for debugging)
+  # Env: QBT_RULES_LOG_TRACE_MODE or QBT_RULES_LOG_TRACE_MODE_FILE
+  trace_mode: false
+
+  # Log HTTP access requests (including health checks)
+  # Env: QBT_RULES_LOG_HTTP_ACCESS or QBT_RULES_LOG_HTTP_ACCESS_FILE
+  # Set to true to see all HTTP requests (useful for debugging)
+  # Set to false (default) to suppress health check logs
+  http_access: false
+
+# ============================================================================
+# LEGACY ENGINE SETTINGS
+# ============================================================================
+# (Maintained for backward compatibility)
+
+engine:
+  # Dry-run mode: Test rules without making changes
+  # Env: QBT_RULES_DRY_RUN or QBT_RULES_DRY_RUN_FILE
+  # Note: Use --dry-run CLI flag instead (preferred)
+  dry_run: false
+
+# ============================================================================
+# DOCKER ENVIRONMENT VARIABLE EXAMPLE
+# ============================================================================
+# When running in Docker, use environment variables instead of editing this file.
+#
+# Example docker-compose.yml:
+#
+# services:
+#   qbt-rules:
+#     image: ghcr.io/andronics/qbt-rules:latest
+#     environment:
+#       # Server config
+#       QBT_RULES_SERVER_API_KEY_FILE: /run/secrets/api_key
+#       QBT_RULES_SERVER_PORT: "5000"
+#
+#       # Queue config
+#       QBT_RULES_QUEUE_BACKEND: sqlite
+#       QBT_RULES_QUEUE_CLEANUP_AFTER: 7d
+#
+#       # qBittorrent connection
+#       QBT_RULES_QBITTORRENT_HOST: http://qbittorrent:8080
+#       QBT_RULES_QBITTORRENT_USERNAME: admin
+#       QBT_RULES_QBITTORRENT_PASSWORD_FILE: /run/secrets/qbt_password
+#
+#       # Logging
+#       QBT_RULES_LOG_LEVEL: INFO
+#     secrets:
+#       - api_key
+#       - qbt_password
+#     volumes:
+#       - ./config:/config
+#     ports:
+#       - "5000:5000"
+#
+# secrets:
+#   api_key:
+#     file: ./secrets/api_key.txt
+#   qbt_password:
+#     file: ./secrets/qbt_password.txt
+#
+# See docs/Docker.md for complete Docker deployment guide.
