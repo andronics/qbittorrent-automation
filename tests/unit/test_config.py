@@ -10,8 +10,346 @@ from qbt_rules.config import (
     load_yaml_file,
     Config,
     load_config,
+    get_nested_config,
+    parse_bool,
+    parse_int,
+    parse_duration,
+    resolve_config,
+    copy_default_if_missing,
+    DEFAULT_CONFIG_SHARE_PATH,
 )
 from qbt_rules.errors import ConfigurationError
+
+
+# ============================================================================
+# get_nested_config()
+# ============================================================================
+
+class TestGetNestedConfig:
+    """Test get_nested_config() function."""
+
+    def test_simple_key(self):
+        """Get value from simple key."""
+        config = {'name': 'test', 'value': 42}
+        assert get_nested_config(config, 'name') == 'test'
+        assert get_nested_config(config, 'value') == 42
+
+    def test_nested_key(self):
+        """Get value from nested key."""
+        config = {
+            'server': {
+                'host': 'localhost',
+                'port': 8080
+            }
+        }
+        assert get_nested_config(config, 'server.host') == 'localhost'
+        assert get_nested_config(config, 'server.port') == 8080
+
+    def test_deeply_nested_key(self):
+        """Get value from deeply nested key."""
+        config = {
+            'db': {
+                'connection': {
+                    'host': '127.0.0.1',
+                    'port': 5432
+                }
+            }
+        }
+        assert get_nested_config(config, 'db.connection.host') == '127.0.0.1'
+        assert get_nested_config(config, 'db.connection.port') == 5432
+
+    def test_missing_key_returns_none(self):
+        """Missing key returns None."""
+        config = {'name': 'test'}
+        assert get_nested_config(config, 'missing') is None
+        assert get_nested_config(config, 'name.nested') is None
+
+    def test_missing_nested_key_returns_none(self):
+        """Missing nested key returns None."""
+        config = {'server': {'host': 'localhost'}}
+        assert get_nested_config(config, 'server.missing') is None
+        assert get_nested_config(config, 'missing.host') is None
+
+    def test_non_dict_value_returns_none(self):
+        """Non-dict value in path returns None."""
+        config = {'value': 'string'}
+        assert get_nested_config(config, 'value.nested') is None
+
+
+# ============================================================================
+# parse_bool()
+# ============================================================================
+
+class TestParseBool:
+    """Test parse_bool() function."""
+
+    def test_none_returns_false(self):
+        """None returns False."""
+        assert parse_bool(None) is False
+
+    def test_bool_true(self):
+        """Boolean True returns True."""
+        assert parse_bool(True) is True
+
+    def test_bool_false(self):
+        """Boolean False returns False."""
+        assert parse_bool(False) is False
+
+    def test_int_zero(self):
+        """Integer 0 returns False."""
+        assert parse_bool(0) is False
+
+    def test_int_non_zero(self):
+        """Non-zero integers return True."""
+        assert parse_bool(1) is True
+        assert parse_bool(42) is True
+        assert parse_bool(-1) is True
+
+    def test_string_true_values(self):
+        """String 'true' variants return True."""
+        assert parse_bool('true') is True
+        assert parse_bool('True') is True
+        assert parse_bool('TRUE') is True
+        assert parse_bool('1') is True
+        assert parse_bool('yes') is True
+        assert parse_bool('YES') is True
+        assert parse_bool('on') is True
+        assert parse_bool('ON') is True
+
+    def test_string_false_values(self):
+        """Other strings return False."""
+        assert parse_bool('false') is False
+        assert parse_bool('0') is False
+        assert parse_bool('no') is False
+        assert parse_bool('off') is False
+        assert parse_bool('random') is False
+
+    def test_other_types(self):
+        """Other types use bool() conversion."""
+        assert parse_bool([1, 2, 3]) is True  # Non-empty list
+        assert parse_bool([]) is False  # Empty list
+        assert parse_bool({'key': 'value'}) is True  # Non-empty dict
+        assert parse_bool({}) is False  # Empty dict
+
+
+# ============================================================================
+# parse_int()
+# ============================================================================
+
+class TestParseInt:
+    """Test parse_int() function."""
+
+    def test_none_returns_default(self):
+        """None returns default value."""
+        assert parse_int(None, default=42) == 42
+        assert parse_int(None, default=0) == 0
+
+    def test_int_returns_int(self):
+        """Integer returns itself."""
+        assert parse_int(42) == 42
+        assert parse_int(0) == 0
+        assert parse_int(-10) == -10
+
+    def test_string_int(self):
+        """String integer parses correctly."""
+        assert parse_int('42') == 42
+        assert parse_int('0') == 0
+        assert parse_int('-10') == -10
+
+    def test_string_invalid_returns_default(self):
+        """Invalid string returns default."""
+        assert parse_int('not_a_number', default=10) == 10
+        assert parse_int('42.5', default=0) == 0
+        assert parse_int('', default=99) == 99
+
+    def test_other_types_convertible(self):
+        """Other types that can convert to int."""
+        assert parse_int(42.0) == 42
+        assert parse_int(42.9) == 42
+
+    def test_other_types_not_convertible(self):
+        """Other types that can't convert return default."""
+        assert parse_int([1, 2, 3], default=10) == 10
+        assert parse_int({'key': 'value'}, default=20) == 20
+
+
+# ============================================================================
+# parse_duration()
+# ============================================================================
+
+class TestParseDuration:
+    """Test parse_duration() function."""
+
+    def test_int_seconds_to_days(self):
+        """Integer seconds convert to days."""
+        assert parse_duration(86400) == '1d'  # 1 day
+        assert parse_duration(172800) == '2d'  # 2 days
+        assert parse_duration(604800) == '7d'  # 7 days
+        assert parse_duration(43200) == '0d'  # Half day rounds down
+
+    def test_string_with_days_format(self):
+        """String '30 days' format converts to '30d'."""
+        assert parse_duration('30 days') == '30d'
+        assert parse_duration('7 days') == '7d'
+        assert parse_duration('1 day') == '1d'
+
+    def test_string_already_formatted(self):
+        """String already in format returns unchanged."""
+        assert parse_duration('7d') == '7d'
+        assert parse_duration('2w') == '2w'
+        assert parse_duration('30d') == '30d'
+
+    def test_string_with_whitespace(self):
+        """String with whitespace is stripped."""
+        assert parse_duration('  7d  ') == '7d'
+        assert parse_duration('2w ') == '2w'
+
+    def test_other_types_to_string(self):
+        """Other types convert to string."""
+        assert parse_duration(42.5) == '42.5'
+
+
+# ============================================================================
+# resolve_config()
+# ============================================================================
+
+class TestResolveConfig:
+    """Test resolve_config() function."""
+
+    def test_cli_value_highest_priority(self):
+        """CLI value takes highest priority."""
+        config = {'key': 'config_value'}
+        with patch.dict(os.environ, {'ENV_VAR': 'env_value'}):
+            result = resolve_config(
+                cli_value='cli_value',
+                env_var='ENV_VAR',
+                config=config,
+                config_key='key',
+                default='default_value'
+            )
+            assert result == 'cli_value'
+
+    def test_env_file_second_priority(self, tmp_path):
+        """_FILE environment variable has second priority."""
+        secret_file = tmp_path / "secret.txt"
+        secret_file.write_text("file_secret")
+
+        config = {'key': 'config_value'}
+        with patch.dict(os.environ, {
+            'ENV_VAR_FILE': str(secret_file),
+            'ENV_VAR': 'env_value'
+        }):
+            result = resolve_config(
+                cli_value=None,
+                env_var='ENV_VAR',
+                config=config,
+                config_key='key',
+                default='default_value'
+            )
+            assert result == 'file_secret'
+
+    def test_env_file_not_found(self, tmp_path):
+        """_FILE with missing file falls through to next priority."""
+        missing_file = tmp_path / "missing.txt"
+
+        with patch.dict(os.environ, {
+            'ENV_VAR_FILE': str(missing_file),
+            'ENV_VAR': 'env_value'
+        }):
+            result = resolve_config(
+                cli_value=None,
+                env_var='ENV_VAR',
+                config=None,
+                config_key='key',
+                default='default_value'
+            )
+            assert result == 'env_value'
+
+    def test_env_file_permission_error(self, tmp_path, mocker):
+        """_FILE with permission error falls through."""
+        secret_file = tmp_path / "secret.txt"
+        secret_file.write_text("file_secret")
+        secret_file.chmod(0o000)  # Remove all permissions
+
+        with patch.dict(os.environ, {
+            'ENV_VAR_FILE': str(secret_file),
+            'ENV_VAR': 'env_value'
+        }):
+            result = resolve_config(
+                cli_value=None,
+                env_var='ENV_VAR',
+                config=None,
+                config_key='key',
+                default='default_value'
+            )
+            assert result == 'env_value'
+
+        # Restore permissions for cleanup
+        secret_file.chmod(0o644)
+
+    def test_env_file_generic_error(self, tmp_path, mocker):
+        """_FILE with generic read error falls through."""
+        secret_file = tmp_path / "secret.txt"
+
+        # Mock open to raise a generic exception
+        with patch.dict(os.environ, {'ENV_VAR_FILE': str(secret_file)}):
+            with patch('builtins.open', side_effect=IOError("Generic error")):
+                result = resolve_config(
+                    cli_value=None,
+                    env_var='ENV_VAR',
+                    config={'key': 'config_value'},
+                    config_key='key',
+                    default='default_value'
+                )
+                assert result == 'config_value'
+
+    def test_direct_env_var_third_priority(self):
+        """Direct environment variable has third priority."""
+        config = {'key': 'config_value'}
+        with patch.dict(os.environ, {'ENV_VAR': 'env_value'}):
+            result = resolve_config(
+                cli_value=None,
+                env_var='ENV_VAR',
+                config=config,
+                config_key='key',
+                default='default_value'
+            )
+            assert result == 'env_value'
+
+    def test_config_file_fourth_priority(self):
+        """Config file value has fourth priority."""
+        config = {'key': 'config_value'}
+        result = resolve_config(
+            cli_value=None,
+            env_var='ENV_VAR',
+            config=config,
+            config_key='key',
+            default='default_value'
+        )
+        assert result == 'config_value'
+
+    def test_nested_config_key(self):
+        """Nested config key uses get_nested_config."""
+        config = {'server': {'host': 'localhost'}}
+        result = resolve_config(
+            cli_value=None,
+            env_var='ENV_VAR',
+            config=config,
+            config_key='server.host',
+            default='default_value'
+        )
+        assert result == 'localhost'
+
+    def test_default_value_lowest_priority(self):
+        """Default value used when nothing else matches."""
+        result = resolve_config(
+            cli_value=None,
+            env_var='ENV_VAR',
+            config=None,
+            config_key='key',
+            default='default_value'
+        )
+        assert result == 'default_value'
 
 
 # ============================================================================
@@ -183,6 +521,125 @@ description: |
         result = load_yaml_file(yaml_file)
         assert 'This is a' in result['description']
         assert 'multiline' in result['description']
+
+
+# ============================================================================
+# copy_default_if_missing()
+# ============================================================================
+
+class TestCopyDefaultIfMissing:
+    """Test copy_default_if_missing() function."""
+
+    def test_copies_when_target_missing(self, tmp_path, mocker):
+        """Should copy default file when target doesn't exist."""
+        # Setup
+        target_path = tmp_path / 'config' / 'config.yml'
+        default_filename = 'config.default.yml'
+
+        # Create mock default file
+        mock_default_dir = tmp_path / 'usr_share'
+        mock_default_dir.mkdir()
+        mock_default_file = mock_default_dir / default_filename
+        mock_default_file.write_text('default: config')
+
+        # Mock DEFAULT_CONFIG_SHARE_PATH
+        mocker.patch('qbt_rules.config.DEFAULT_CONFIG_SHARE_PATH', mock_default_dir)
+
+        # Execute
+        result = copy_default_if_missing(target_path, default_filename)
+
+        # Verify
+        assert result is True
+        assert target_path.exists()
+        assert target_path.read_text() == 'default: config'
+
+    def test_skips_when_target_exists(self, tmp_path, mocker):
+        """Should not copy when target already exists."""
+        # Setup
+        target_path = tmp_path / 'config.yml'
+        target_path.write_text('existing: config')
+        default_filename = 'config.default.yml'
+
+        # Create mock default file
+        mock_default_dir = tmp_path / 'usr_share'
+        mock_default_dir.mkdir()
+        mock_default_file = mock_default_dir / default_filename
+        mock_default_file.write_text('default: config')
+
+        # Mock DEFAULT_CONFIG_SHARE_PATH
+        mocker.patch('qbt_rules.config.DEFAULT_CONFIG_SHARE_PATH', mock_default_dir)
+
+        # Execute
+        result = copy_default_if_missing(target_path, default_filename)
+
+        # Verify
+        assert result is False
+        assert target_path.read_text() == 'existing: config'
+
+    def test_returns_false_when_default_missing(self, tmp_path, mocker):
+        """Should return False when default file doesn't exist."""
+        # Setup
+        target_path = tmp_path / 'config.yml'
+        default_filename = 'config.default.yml'
+
+        # Mock DEFAULT_CONFIG_SHARE_PATH to non-existent directory
+        mock_default_dir = tmp_path / 'usr_share'
+        mocker.patch('qbt_rules.config.DEFAULT_CONFIG_SHARE_PATH', mock_default_dir)
+
+        # Execute
+        result = copy_default_if_missing(target_path, default_filename)
+
+        # Verify
+        assert result is False
+        assert not target_path.exists()
+
+    def test_creates_parent_directory(self, tmp_path, mocker):
+        """Should create parent directory if it doesn't exist."""
+        # Setup
+        target_path = tmp_path / 'config' / 'subdir' / 'config.yml'
+        default_filename = 'config.default.yml'
+
+        # Create mock default file
+        mock_default_dir = tmp_path / 'usr_share'
+        mock_default_dir.mkdir()
+        mock_default_file = mock_default_dir / default_filename
+        mock_default_file.write_text('default: config')
+
+        # Mock DEFAULT_CONFIG_SHARE_PATH
+        mocker.patch('qbt_rules.config.DEFAULT_CONFIG_SHARE_PATH', mock_default_dir)
+
+        # Execute
+        result = copy_default_if_missing(target_path, default_filename)
+
+        # Verify
+        assert result is True
+        assert target_path.parent.exists()
+        assert target_path.exists()
+
+    def test_handles_copy_failure_gracefully(self, tmp_path, mocker):
+        """Should handle copy failures gracefully and return False."""
+        # Setup
+        target_path = tmp_path / 'config.yml'
+        default_filename = 'config.default.yml'
+
+        # Create mock default file
+        mock_default_dir = tmp_path / 'usr_share'
+        mock_default_dir.mkdir()
+        mock_default_file = mock_default_dir / default_filename
+        mock_default_file.write_text('default: config')
+
+        # Mock DEFAULT_CONFIG_SHARE_PATH
+        mocker.patch('qbt_rules.config.DEFAULT_CONFIG_SHARE_PATH', mock_default_dir)
+
+        # Mock shutil.copy2 to raise exception
+        mocker.patch('qbt_rules.config.shutil.copy2', side_effect=PermissionError('Test error'))
+
+        # Execute
+        result = copy_default_if_missing(target_path, default_filename)
+
+        # Verify
+        assert result is False
+        assert not target_path.exists()
 
 
 # ============================================================================

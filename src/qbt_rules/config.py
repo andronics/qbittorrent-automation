@@ -1,15 +1,318 @@
 """
-Configuration loader with environment variable expansion
+Configuration loader with environment variable expansion and universal _FILE support
+
+Resolution order (highest to lowest priority):
+1. CLI arguments
+2. Environment variable _FILE variant (reads from file)
+3. Environment variable (direct value)
+4. Config file
+5. Default value
 """
 
 import os
 import re
+import sys
+import shutil
 import yaml
 import logging
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 
 from qbt_rules.errors import ConfigurationError
+
+
+# Environment variable mapping
+# Maps config keys to environment variable names
+ENV_VAR_MAP = {
+    # Server configuration
+    'server.host': 'QBT_RULES_SERVER_HOST',
+    'server.port': 'QBT_RULES_SERVER_PORT',
+    'server.api_key': 'QBT_RULES_SERVER_API_KEY',
+    'server.workers': 'QBT_RULES_SERVER_WORKERS',
+
+    # Queue configuration
+    'queue.backend': 'QBT_RULES_QUEUE_BACKEND',
+    'queue.sqlite_path': 'QBT_RULES_QUEUE_SQLITE_PATH',
+    'queue.redis_url': 'QBT_RULES_QUEUE_REDIS_URL',
+    'queue.cleanup_after': 'QBT_RULES_QUEUE_CLEANUP_AFTER',
+
+    # Client configuration
+    'client.server_url': 'QBT_RULES_CLIENT_SERVER_URL',
+    'client.api_key': 'QBT_RULES_CLIENT_API_KEY',
+
+    # qBittorrent configuration
+    'qbittorrent.host': 'QBT_RULES_QBITTORRENT_HOST',
+    'qbittorrent.username': 'QBT_RULES_QBITTORRENT_USERNAME',
+    'qbittorrent.password': 'QBT_RULES_QBITTORRENT_PASSWORD',
+
+    # Legacy compatibility
+    'qbittorrent.user': 'QBT_RULES_QBITTORRENT_USERNAME',
+    'qbittorrent.pass': 'QBT_RULES_QBITTORRENT_PASSWORD',
+
+    # Rules & logging
+    'rules.file': 'QBT_RULES_RULES_FILE',
+    'config.dir': 'QBT_RULES_CONFIG_DIR',
+    'logging.level': 'QBT_RULES_LOG_LEVEL',
+    'logging.file': 'QBT_RULES_LOG_FILE',
+    'logging.trace_mode': 'QBT_RULES_LOG_TRACE_MODE',
+
+    # Legacy logging
+    'engine.dry_run': 'QBT_RULES_DRY_RUN',
+}
+
+# Default config location (Linux FHS standard)
+DEFAULT_CONFIG_SHARE_PATH = Path('/usr/share/qbt-rules')
+
+
+def copy_default_if_missing(target_path: Path, default_filename: str) -> bool:
+    """
+    Copy default config from /usr/share if target doesn't exist.
+
+    Args:
+        target_path: Target file path (e.g., /config/config.yml)
+        default_filename: Default filename (e.g., 'config.default.yml')
+
+    Returns:
+        True if file was copied, False otherwise
+    """
+    if target_path.exists():
+        return False
+
+    default_path = DEFAULT_CONFIG_SHARE_PATH / default_filename
+    if not default_path.exists():
+        return False
+
+    try:
+        # Ensure parent directory exists
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Copy default to target location
+        shutil.copy2(default_path, target_path)
+        print(f"INFO: Created {target_path} from {default_path}", file=sys.stderr)
+
+        return True
+    except Exception as e:
+        print(f"WARNING: Failed to copy default config: {e}", file=sys.stderr)
+        return False
+
+
+def get_nested_config(config: Dict[str, Any], key: str) -> Optional[Any]:
+    """
+    Get nested configuration value using dot notation
+
+    Args:
+        config: Configuration dictionary
+        key: Dot-notation key (e.g., 'server.host')
+
+    Returns:
+        Configuration value or None if not found
+
+    Examples:
+        >>> config = {'server': {'host': 'localhost', 'port': 5000}}
+        >>> get_nested_config(config, 'server.host')
+        'localhost'
+        >>> get_nested_config(config, 'server.missing')
+        None
+    """
+    keys = key.split('.')
+    value = config
+
+    for k in keys:
+        if isinstance(value, dict) and k in value:
+            value = value[k]
+        else:
+            return None
+
+    return value
+
+
+def parse_bool(value: Any) -> bool:
+    """
+    Parse boolean from various formats
+
+    Args:
+        value: Value to parse (str, int, bool, None)
+
+    Returns:
+        Boolean value
+
+    Examples:
+        >>> parse_bool('true')
+        True
+        >>> parse_bool('1')
+        True
+        >>> parse_bool(0)
+        False
+        >>> parse_bool(None)
+        False
+    """
+    if value is None:
+        return False
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, int):
+        return value != 0
+
+    if isinstance(value, str):
+        return value.lower() in ('true', '1', 'yes', 'on')
+
+    return bool(value)
+
+
+def parse_int(value: Any, default: int = 0) -> int:
+    """
+    Parse integer from various formats
+
+    Args:
+        value: Value to parse
+        default: Default value if parsing fails
+
+    Returns:
+        Integer value
+    """
+    if value is None:
+        return default
+
+    if isinstance(value, int):
+        return value
+
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def parse_duration(value: Union[str, int]) -> str:
+    """
+    Parse duration string to standardized format
+
+    Args:
+        value: Duration (e.g., '7d', '30 days', '2w', 86400)
+
+    Returns:
+        Standardized duration string
+
+    Examples:
+        >>> parse_duration('7d')
+        '7d'
+        >>> parse_duration('30 days')
+        '30d'
+        >>> parse_duration(86400)
+        '1d'
+    """
+    if isinstance(value, int):
+        # Convert seconds to days
+        days = value // 86400
+        return f'{days}d'
+
+    if isinstance(value, str):
+        # Already in format like '7d', '2w', etc.
+        value = value.strip().lower()
+
+        # Handle "30 days" format
+        if ' day' in value:
+            days = int(value.split()[0])
+            return f'{days}d'
+
+        return value
+
+    return str(value)
+
+
+def resolve_config(
+    cli_value: Optional[Any],
+    env_var: str,
+    config: Dict[str, Any],
+    config_key: str,
+    default: Optional[Any] = None
+) -> Any:
+    """
+    Universal configuration resolver with _FILE support
+
+    Resolution order:
+    1. CLI argument (if provided)
+    2. Environment variable _FILE variant (reads file content)
+    3. Environment variable (direct value)
+    4. Config file value
+    5. Default value
+
+    ALL environment variables support _FILE variants automatically.
+
+    Args:
+        cli_value: Value from CLI argument (None if not provided)
+        env_var: Environment variable name (without _FILE suffix)
+        config: Loaded configuration dictionary
+        config_key: Dot-notation key for config file (e.g., 'server.port')
+        default: Default value if no source provides a value
+
+    Returns:
+        Resolved configuration value
+
+    Examples:
+        >>> resolve_config(
+        ...     cli_value=None,
+        ...     env_var='QBT_RULES_SERVER_PORT',
+        ...     config={'server': {'port': 5000}},
+        ...     config_key='server.port',
+        ...     default=8080
+        ... )
+        5000
+
+        >>> os.environ['QBT_RULES_SERVER_API_KEY_FILE'] = '/secrets/key'
+        >>> # If /secrets/key contains "my-secret-key"
+        >>> resolve_config(
+        ...     cli_value=None,
+        ...     env_var='QBT_RULES_SERVER_API_KEY',
+        ...     config={},
+        ...     config_key='server.api_key',
+        ...     default=None
+        ... )
+        'my-secret-key'
+    """
+    # 1. CLI argument takes highest priority
+    if cli_value is not None:
+        return cli_value
+
+    # 2. Check _FILE variant (universal support)
+    file_var = f"{env_var}_FILE"
+    if file_var in os.environ:
+        file_path = os.environ[file_var]
+        try:
+            with open(file_path, 'r') as f:
+                content = f.read().strip()
+            logging.debug(f"Loaded config from file: {file_var}={file_path}")
+            return content
+        except FileNotFoundError:
+            logging.warning(f"File not found for {file_var}: {file_path}")
+        except PermissionError:
+            logging.warning(f"Permission denied reading {file_var}: {file_path}")
+        except Exception as e:
+            logging.warning(f"Error reading {file_var} from {file_path}: {e}")
+
+    # 3. Direct environment variable
+    if env_var in os.environ:
+        value = os.environ[env_var]
+        logging.debug(f"Loaded config from env: {env_var}={value}")
+        return value
+
+    # 4. Config file value
+    if config:
+        value = get_nested_config(config, config_key)
+        if value is not None:
+            logging.debug(f"Loaded config from file: {config_key}={value}")
+            return value
+
+    # 5. Default value
+    logging.debug(f"Using default config: {config_key}={default}")
+    return default
 
 
 def expand_env_vars(value: Any) -> Any:
@@ -119,6 +422,10 @@ class Config:
         self.config_file = config_dir / 'config.yml'
         self.rules_file = config_dir / 'rules.yml'
 
+        # Auto-copy defaults if missing
+        copy_default_if_missing(self.config_file, 'config.default.yml')
+        copy_default_if_missing(self.rules_file, 'rules.default.yml')
+
         # Load configurations
         self._load_config()
         self._load_rules()
@@ -144,6 +451,32 @@ class Config:
                 str(self.rules_file),
                 "'rules' must be a list"
             )
+
+        # Validate required fields for each rule
+        for i, rule in enumerate(self.rules):
+            if not isinstance(rule, dict):
+                raise ConfigurationError(
+                    str(self.rules_file),
+                    f"Rule #{i+1} must be a dictionary"
+                )
+
+            if 'name' not in rule:
+                raise ConfigurationError(
+                    str(self.rules_file),
+                    f"Rule #{i+1} missing required field: 'name'"
+                )
+
+            if 'conditions' not in rule:
+                raise ConfigurationError(
+                    str(self.rules_file),
+                    f"Rule '{rule['name']}' missing required field: 'conditions'"
+                )
+
+            if 'actions' not in rule:
+                raise ConfigurationError(
+                    str(self.rules_file),
+                    f"Rule '{rule['name']}' missing required field: 'actions'"
+                )
 
         logging.debug(f"Loaded {len(self.rules)} rules")
 
