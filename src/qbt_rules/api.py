@@ -1,9 +1,11 @@
 """
-qBittorrent Web API client
-Complete implementation of qBittorrent Web API v2 (>= v5.0)
+qBittorrent Web API client - qbittorrent-api wrapper
+
+Wraps qbittorrent-api package for multi-version support (v4.1+ through v5.1.4+)
+Maintains backward compatibility with existing qbt-rules interface
 """
 
-import requests
+import qbittorrentapi
 from typing import List, Dict, Any, Optional
 
 from qbt_rules.errors import AuthenticationError, ConnectionError, APIError
@@ -13,88 +15,70 @@ logger = get_logger(__name__)
 
 
 class QBittorrentAPI:
-    """qBittorrent Web API client"""
+    """
+    qBittorrent Web API client wrapper
 
-    def __init__(self, host: str, username: str, password: str):
+    Uses qbittorrent-api package for:
+    - Multi-version support (v4.1+ through v5.1.4+)
+    - Automatic version detection
+    - Auto-managed authentication
+    - Structured response types
+    """
+
+    def __init__(self, host: str, username: str, password: str, connect_now: bool = True):
         """
-        Initialize API client and authenticate
+        Initialize API client and optionally authenticate
 
         Args:
             host: qBittorrent host URL (e.g., 'http://localhost:8080')
             username: qBittorrent username
             password: qBittorrent password
+            connect_now: If True, authenticate immediately; if False, defer until first API call
+
+        Raises:
+            AuthenticationError: If login fails (only when connect_now=True)
+            ConnectionError: If cannot reach server (only when connect_now=True)
+        """
+        self.host = host.rstrip('/')
+        self.username = username
+        self.password = password
+        self._connected = False
+
+        # Initialize qbittorrent-api client (does not connect yet)
+        self.client = qbittorrentapi.Client(
+            host=self.host,
+            username=self.username,
+            password=self.password
+        )
+
+        if connect_now:
+            self._ensure_connected()
+
+    def _ensure_connected(self):
+        """
+        Ensure we're connected to qBittorrent (lazy initialization support)
 
         Raises:
             AuthenticationError: If login fails
             ConnectionError: If cannot reach server
         """
-        self.host = host.rstrip('/')
-        self.username = username
-        self.password = password
-        self.session = requests.Session()
-        self._login()
+        if self._connected:
+            return
 
-    def _login(self):
-        """Authenticate with qBittorrent"""
         try:
-            response = self.session.post(
-                f"{self.host}/api/v2/auth/login",
-                data={"username": self.username, "password": self.password},
-                timeout=10
-            )
-
-            if response.text != "Ok.":
-                raise AuthenticationError(self.host, response.text)
+            # Verify connection
+            self.client.auth_log_in()
+            self._connected = True
 
             logger.info(f"Successfully authenticated with qBittorrent at {self.host}")
+            logger.debug(f"qBittorrent version: {self.client.app_version()}")
+            logger.debug(f"Web API version: {self.client.app_web_api_version()}")
 
-        except requests.exceptions.RequestException as e:
+        except qbittorrentapi.LoginFailed as e:
+            raise AuthenticationError(self.host, str(e))
+        except qbittorrentapi.APIConnectionError as e:
             raise ConnectionError(self.host, str(e))
-
-    def _api_call(self, endpoint: str, method: str = 'POST', data: Optional[Dict] = None,
-                  params: Optional[Dict] = None, timeout: int = 30) -> requests.Response:
-        """
-        Generic API call wrapper with error handling
-
-        Args:
-            endpoint: API endpoint (e.g., '/api/v2/torrents/info')
-            method: HTTP method ('GET' or 'POST')
-            data: POST data
-            params: URL parameters
-            timeout: Request timeout in seconds
-
-        Returns:
-            Response object
-
-        Raises:
-            ConnectionError: If cannot reach server
-            APIError: If API returns error status
-        """
-        url = f"{self.host}{endpoint}"
-
-        try:
-            if method == 'GET':
-                response = self.session.get(url, params=params, timeout=timeout)
-            else:
-                response = self.session.post(url, data=data, params=params, timeout=timeout)
-
-            # Check for common error status codes
-            if response.status_code == 403:
-                # Re-login and retry once
-                logger.warning("Session expired, re-authenticating...")
-                self._login()
-
-                if method == 'GET':
-                    response = self.session.get(url, params=params, timeout=timeout)
-                else:
-                    response = self.session.post(url, data=data, params=params, timeout=timeout)
-
-            if response.status_code not in [200, 201]:
-                raise APIError(endpoint, response.status_code, response.text)
-
-            return response
-
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             raise ConnectionError(self.host, str(e))
 
     # Torrent Information Methods
@@ -112,16 +96,35 @@ class QBittorrentAPI:
         Returns:
             List of torrent dictionaries
         """
-        params = {}
-        if filter_type:
-            params['filter'] = filter_type
-        if category:
-            params['category'] = category
-        if tag:
-            params['tag'] = tag
+        self._ensure_connected()
 
-        response = self._api_call('/api/v2/torrents/info', method='GET', params=params)
-        return response.json()
+        # Use qbittorrent-api Client
+        torrents = self.client.torrents_info(
+            status_filter=filter_type,
+            category=category,
+            tag=tag
+        )
+
+        # Convert to list of dicts (qbittorrent-api returns TorrentInfoList)
+        return [dict(t) for t in torrents]
+
+    def get_torrent(self, torrent_hash: str) -> Optional[Dict]:
+        """
+        Get single torrent by hash
+
+        Args:
+            torrent_hash: Torrent hash
+
+        Returns:
+            Torrent dictionary or None if not found
+        """
+        self._ensure_connected()
+
+        # Use qbittorrent-api Client with specific hash
+        torrents = self.client.torrents_info(torrent_hashes=torrent_hash)
+
+        # Return first torrent or None if not found
+        return dict(torrents[0]) if torrents else None
 
     def get_properties(self, torrent_hash: str) -> Dict:
         """
@@ -133,12 +136,8 @@ class QBittorrentAPI:
         Returns:
             Properties dictionary
         """
-        response = self._api_call(
-            '/api/v2/torrents/properties',
-            method='GET',
-            params={'hash': torrent_hash}
-        )
-        return response.json()
+        props = self.client.torrents_properties(torrent_hash=torrent_hash)
+        return dict(props)
 
     def get_trackers(self, torrent_hash: str) -> List[Dict]:
         """
@@ -150,12 +149,8 @@ class QBittorrentAPI:
         Returns:
             List of tracker dictionaries
         """
-        response = self._api_call(
-            '/api/v2/torrents/trackers',
-            method='GET',
-            params={'hash': torrent_hash}
-        )
-        return response.json()
+        trackers = self.client.torrents_trackers(torrent_hash=torrent_hash)
+        return [dict(t) for t in trackers]
 
     def get_files(self, torrent_hash: str) -> List[Dict]:
         """
@@ -167,12 +162,8 @@ class QBittorrentAPI:
         Returns:
             List of file dictionaries
         """
-        response = self._api_call(
-            '/api/v2/torrents/files',
-            method='GET',
-            params={'hash': torrent_hash}
-        )
-        return response.json()
+        files = self.client.torrents_files(torrent_hash=torrent_hash)
+        return [dict(f) for f in files]
 
     def get_webseeds(self, torrent_hash: str) -> List[Dict]:
         """
@@ -184,12 +175,8 @@ class QBittorrentAPI:
         Returns:
             List of web seed dictionaries
         """
-        response = self._api_call(
-            '/api/v2/torrents/webseeds',
-            method='GET',
-            params={'hash': torrent_hash}
-        )
-        return response.json()
+        webseeds = self.client.torrents_webseeds(torrent_hash=torrent_hash)
+        return [dict(w) for w in webseeds]
 
     def get_peers(self, torrent_hash: str) -> List[Dict]:
         """
@@ -199,16 +186,13 @@ class QBittorrentAPI:
             torrent_hash: Torrent hash
 
         Returns:
-            Dictionary of peers (peer_id -> peer_data)
+            List of peer dictionaries
         """
-        response = self._api_call(
-            '/api/v2/sync/torrentPeers',
-            method='GET',
-            params={'hash': torrent_hash}
-        )
+        peers_data = self.client.sync_torrent_peers(torrent_hash=torrent_hash)
+
         # Convert peers dict to list of dicts for consistency
-        peers_dict = response.json().get('peers', {})
-        return [{'id': peer_id, **peer_data} for peer_id, peer_data in peers_dict.items()]
+        peers_dict = peers_data.get('peers', {})
+        return [{'id': peer_id, **dict(peer_data)} for peer_id, peer_data in peers_dict.items()]
 
     # Global Information Methods
 
@@ -219,8 +203,8 @@ class QBittorrentAPI:
         Returns:
             Transfer info dictionary with speeds, data transferred, etc.
         """
-        response = self._api_call('/api/v2/transfer/info', method='GET')
-        return response.json()
+        info = self.client.transfer_info()
+        return dict(info)
 
     def get_app_preferences(self) -> Dict:
         """
@@ -229,104 +213,68 @@ class QBittorrentAPI:
         Returns:
             Preferences dictionary
         """
-        response = self._api_call('/api/v2/app/preferences', method='GET')
-        return response.json()
+        prefs = self.client.app_preferences()
+        return dict(prefs)
 
     # Torrent Control Methods
 
     def stop_torrents(self, hashes: List[str]) -> bool:
         """Stop torrents (pause in qBittorrent v5.0+)"""
-        self._api_call(
-            '/api/v2/torrents/stop',
-            data={'hashes': '|'.join(hashes)}
-        )
+        self.client.torrents_pause(torrent_hashes=hashes)
         return True
 
     def start_torrents(self, hashes: List[str]) -> bool:
         """Start torrents (resume in qBittorrent v5.0+)"""
-        self._api_call(
-            '/api/v2/torrents/start',
-            data={'hashes': '|'.join(hashes)}
-        )
+        self.client.torrents_resume(torrent_hashes=hashes)
         return True
 
     def force_start_torrents(self, hashes: List[str]) -> bool:
         """Force start torrents"""
-        self._api_call(
-            '/api/v2/torrents/setForceStart',
-            data={'hashes': '|'.join(hashes), 'value': 'true'}
-        )
+        self.client.torrents_set_force_start(enable=True, torrent_hashes=hashes)
         return True
 
     def recheck_torrents(self, hashes: List[str]) -> bool:
         """Recheck torrents"""
-        self._api_call(
-            '/api/v2/torrents/recheck',
-            data={'hashes': '|'.join(hashes)}
-        )
+        self.client.torrents_recheck(torrent_hashes=hashes)
         return True
 
     def reannounce_torrents(self, hashes: List[str]) -> bool:
         """Reannounce torrents to trackers"""
-        self._api_call(
-            '/api/v2/torrents/reannounce',
-            data={'hashes': '|'.join(hashes)}
-        )
+        self.client.torrents_reannounce(torrent_hashes=hashes)
         return True
 
     def delete_torrents(self, hashes: List[str], delete_files: bool) -> bool:
         """Delete torrents"""
-        self._api_call(
-            '/api/v2/torrents/delete',
-            data={
-                'hashes': '|'.join(hashes),
-                'deleteFiles': 'true' if delete_files else 'false'
-            }
-        )
+        self.client.torrents_delete(delete_files=delete_files, torrent_hashes=hashes)
         return True
 
     # Category and Tag Methods
 
     def set_category(self, hashes: List[str], category: str) -> bool:
         """Set category"""
-        self._api_call(
-            '/api/v2/torrents/setCategory',
-            data={'hashes': '|'.join(hashes), 'category': category}
-        )
+        self.client.torrents_set_category(category=category, torrent_hashes=hashes)
         return True
 
     def add_tags(self, hashes: List[str], tags: List[str]) -> bool:
         """Add tags"""
-        self._api_call(
-            '/api/v2/torrents/addTags',
-            data={'hashes': '|'.join(hashes), 'tags': ','.join(tags)}
-        )
+        self.client.torrents_add_tags(tags=tags, torrent_hashes=hashes)
         return True
 
     def remove_tags(self, hashes: List[str], tags: List[str]) -> bool:
         """Remove tags"""
-        self._api_call(
-            '/api/v2/torrents/removeTags',
-            data={'hashes': '|'.join(hashes), 'tags': ','.join(tags)}
-        )
+        self.client.torrents_remove_tags(tags=tags, torrent_hashes=hashes)
         return True
 
     # Limit Methods
 
     def set_upload_limit(self, hashes: List[str], limit: int) -> bool:
         """Set upload limit (bytes/s, -1 for unlimited)"""
-        self._api_call(
-            '/api/v2/torrents/setUploadLimit',
-            data={'hashes': '|'.join(hashes), 'limit': limit}
-        )
+        self.client.torrents_set_upload_limit(limit=limit, torrent_hashes=hashes)
         return True
 
     def set_download_limit(self, hashes: List[str], limit: int) -> bool:
         """Set download limit (bytes/s, -1 for unlimited)"""
-        self._api_call(
-            '/api/v2/torrents/setDownloadLimit',
-            data={'hashes': '|'.join(hashes), 'limit': limit}
-        )
+        self.client.torrents_set_download_limit(limit=limit, torrent_hashes=hashes)
         return True
 
     def set_share_limits(self, hashes: List[str], ratio_limit: float = -2,
@@ -339,13 +287,10 @@ class QBittorrentAPI:
             ratio_limit: Max ratio (-2=global, -1=unlimited, >=0=limit)
             seeding_time_limit: Max seeding time in minutes (-2=global, -1=unlimited, >=0=limit)
         """
-        self._api_call(
-            '/api/v2/torrents/setShareLimits',
-            data={
-                'hashes': '|'.join(hashes),
-                'ratioLimit': ratio_limit,
-                'seedingTimeLimit': seeding_time_limit
-            }
+        self.client.torrents_set_share_limits(
+            ratio_limit=ratio_limit,
+            seeding_time_limit=seeding_time_limit,
+            torrent_hashes=hashes
         )
         return True
 
@@ -353,32 +298,20 @@ class QBittorrentAPI:
 
     def increase_priority(self, hashes: List[str]) -> bool:
         """Increase torrent priority"""
-        self._api_call(
-            '/api/v2/torrents/increasePrio',
-            data={'hashes': '|'.join(hashes)}
-        )
+        self.client.torrents_increase_priority(torrent_hashes=hashes)
         return True
 
     def decrease_priority(self, hashes: List[str]) -> bool:
         """Decrease torrent priority"""
-        self._api_call(
-            '/api/v2/torrents/decreasePrio',
-            data={'hashes': '|'.join(hashes)}
-        )
+        self.client.torrents_decrease_priority(torrent_hashes=hashes)
         return True
 
     def set_top_priority(self, hashes: List[str]) -> bool:
         """Set maximum priority"""
-        self._api_call(
-            '/api/v2/torrents/topPrio',
-            data={'hashes': '|'.join(hashes)}
-        )
+        self.client.torrents_top_priority(torrent_hashes=hashes)
         return True
 
     def set_bottom_priority(self, hashes: List[str]) -> bool:
         """Set minimum priority"""
-        self._api_call(
-            '/api/v2/torrents/bottomPrio',
-            data={'hashes': '|'.join(hashes)}
-        )
+        self.client.torrents_bottom_priority(torrent_hashes=hashes)
         return True

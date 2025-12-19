@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "qbt-rules"
-version = "0.3.2"
-description = "A powerful Python-based rules engine for qBittorrent automation"
+version = "0.4.1"
+description = "A powerful Python-based rules engine for qBittorrent automation with client-server architecture"
 readme = "README.md"
 authors = [
     {name = "andronics"},
@@ -25,17 +25,27 @@ classifiers = [
     "Topic :: Communications :: File Sharing",
     "Topic :: Utilities",
 ]
-keywords = ["qbittorrent", "automation", "torrent", "rules-engine", "api"]
+keywords = ["qbittorrent", "automation", "torrent", "rules-engine", "api", "docker"]
 requires-python = ">=3.8"
 dependencies = [
     "requests>=2.31.0",
     "PyYAML>=6.0.2",
+    "qbittorrent-api>=2024.12.0",
+    "Flask>=3.0.0",
+    "gunicorn>=21.2.0",
 ]
 
 [project.optional-dependencies]
+redis = [
+    "redis>=5.0.0",
+]
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
+    "pytest-flask>=1.3.0",
+    "pytest-mock>=3.12.0",
+    "fakeredis[lua]>=2.20.0",
+    "requests-mock>=1.11.0",
     "mypy>=1.5.0",
     "black>=23.7.0",
     "ruff>=0.0.287",
@@ -77,6 +87,7 @@ addopts = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "redis: marks tests that require Redis (deselect with '-m \"not redis\"')",
 ]
 
 # coverage configuration
@@ -85,6 +96,8 @@ source = ["src/qbt_rules"]
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
+    "*/__init__.py",
+    "*/__version__.py",
 ]
 
 [tool.coverage.report]
