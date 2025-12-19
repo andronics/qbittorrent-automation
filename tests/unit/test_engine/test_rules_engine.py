@@ -51,7 +51,7 @@ class TestBasicExecution:
         mock_api.torrents_data = {}
         engine = RulesEngine(mock_api, mock_config)
 
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.total_torrents == 0
 
@@ -61,7 +61,7 @@ class TestBasicExecution:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.total_torrents == 1
 
@@ -74,7 +74,7 @@ class TestBasicExecution:
         }
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.total_torrents == 2
 
@@ -84,7 +84,7 @@ class TestBasicExecution:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.total_torrents == 1
         assert engine.stats.rules_matched == 0
@@ -101,7 +101,7 @@ class TestBasicExecution:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.rules_matched == 0
 
@@ -127,7 +127,7 @@ class TestRuleMatching:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.rules_matched == 1
         assert engine.stats.actions_executed >= 1
@@ -146,7 +146,7 @@ class TestRuleMatching:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.rules_matched == 0
         assert engine.stats.actions_executed == 0
@@ -169,7 +169,7 @@ class TestRuleMatching:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         # Both rules should match
         assert engine.stats.rules_matched == 2
@@ -189,7 +189,7 @@ class TestRuleMatching:
         }
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         # Only one should match
         assert engine.stats.rules_matched == 1
@@ -212,7 +212,7 @@ class TestRuleMatching:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         # Both rules match same torrent
         assert engine.stats.rules_matched == 2
@@ -244,7 +244,7 @@ class TestStopOnMatch:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         # Only first rule should match
         assert engine.stats.rules_matched == 1
@@ -269,7 +269,7 @@ class TestStopOnMatch:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         # Both rules should match
         assert engine.stats.rules_matched == 2
@@ -296,7 +296,7 @@ class TestStopOnMatch:
         }
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         # Both rules should match different torrents
         assert engine.stats.rules_matched == 2
@@ -320,7 +320,7 @@ class TestStopOnMatch:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         # Only rule2 should match
         assert engine.stats.rules_matched == 1
@@ -342,7 +342,7 @@ class TestSingleTorrentMode:
         }
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='on_added', torrent_hash=sample_torrent['hash'])
+        engine.run(context='torrent-imported', torrent_hash=sample_torrent['hash'])
 
         # Should only process the one torrent
         assert engine.stats.total_torrents == 1
@@ -353,7 +353,7 @@ class TestSingleTorrentMode:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='on_added', torrent_hash='nonexistent')
+        engine.run(context='torrent-imported', torrent_hash='nonexistent')
 
         # Should find no torrents
         assert engine.stats.total_torrents == 0
@@ -370,7 +370,7 @@ class TestSingleTorrentMode:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='on_completed', torrent_hash=sample_torrent['hash'])
+        engine.run(context='download-finished', torrent_hash=sample_torrent['hash'])
 
         assert engine.stats.rules_matched == 1
 
@@ -397,7 +397,7 @@ class TestStatisticsTracking:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.actions_executed == 2
 
@@ -414,7 +414,7 @@ class TestStatisticsTracking:
         mock_api.torrents_data = {torrent['hash']: torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.actions_skipped == 1
         assert engine.stats.actions_executed == 0
@@ -431,7 +431,7 @@ class TestStatisticsTracking:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.errors == 1
 
@@ -451,7 +451,7 @@ class TestStatisticsTracking:
         }
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.processed == 2
 
@@ -470,7 +470,7 @@ class TestErrorHandling:
         engine = RulesEngine(mock_api, mock_config)
 
         with pytest.raises(Exception) as exc_info:
-            engine.run(trigger='manual')
+            engine.run(context='adhoc-run')
 
         assert "Fatal error" in str(exc_info.value)
 
@@ -482,7 +482,7 @@ class TestErrorHandling:
 
         with pytest.raises(Exception):
             with patch('qbt_rules.engine.logger.info') as mock_log:
-                engine.run(trigger='manual')
+                engine.run(context='adhoc-run')
 
                 # Summary should still be logged
                 summary_calls = [call for call in mock_log.call_args_list if 'Summary' in str(call)]
@@ -523,7 +523,7 @@ class TestRulesEngineIntegration:
         }
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         # Verify execution
         assert engine.stats.total_torrents == 3
@@ -542,7 +542,7 @@ class TestRulesEngineIntegration:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config, dry_run=True)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         # Should match but not execute
         assert engine.stats.rules_matched == 1

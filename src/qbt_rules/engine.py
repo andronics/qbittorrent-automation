@@ -59,27 +59,30 @@ class ConditionEvaluator:
         self.transfer_info = None
         self.app_preferences = None
 
-    def evaluate(self, torrent: Dict, conditions: Dict, trigger: Optional[str] = None) -> bool:
+    def evaluate(self, torrent: Dict, conditions: Dict, current_context: Optional[str] = None, required_context: Optional[Any] = None) -> bool:
         """
         Evaluate all conditions for a torrent
 
         Args:
             torrent: Torrent dictionary from qBittorrent API
             conditions: Conditions dictionary from rule
-            trigger: Current trigger type (on_added, on_completed, scheduled, manual, custom, or None)
-                    When None (trigger-agnostic mode), only matches rules without trigger conditions
+            current_context: Current runtime context (torrent-imported, download-finished, weekly-cleanup, adhoc-run, custom, or None)
+            required_context: Context requirement from rule level (string or list of strings)
+                            When None, rule has no context requirement and executes regardless of runtime context
 
         Returns:
             True if all conditions match
+
+        Notes:
+            - Rules WITHOUT context (required_context=None) execute regardless of runtime context
+            - Rules WITH context only execute when runtime context matches their requirement
         """
         try:
-            # Check trigger condition first
-            if 'trigger' in conditions:
-                if not self._evaluate_trigger(trigger, conditions['trigger']):
+            # Check context requirement first (from rule level, not inside conditions)
+            if required_context is not None:
+                if not self._evaluate_context(current_context, required_context):
                     return False
-            # In trigger-agnostic mode (trigger=None), skip rules WITH trigger conditions
-            elif trigger is None:
-                return False
+            # If required_context is None, rule has no context requirement → continue to conditions
 
             # Evaluate logical groups
             if 'all' in conditions:
@@ -100,30 +103,33 @@ class ConditionEvaluator:
             logger.error(f"Error evaluating conditions for {torrent.get('name', 'unknown')}: {e}")
             return False
 
-    def _evaluate_trigger(self, current_trigger: Optional[str], required_trigger: Any) -> bool:
+    def _evaluate_context(self, current_context: Optional[str], required_context: Any) -> bool:
         """
-        Evaluate trigger condition
+        Evaluate if current runtime context matches the rule's context requirement
 
         Args:
-            current_trigger: Current trigger type (or None for trigger-agnostic mode)
-            required_trigger: Required trigger (string or list of strings)
+            current_context: Current runtime context (torrent-imported, weekly-cleanup, adhoc-run, etc.)
+                           Can be None if running without a specific context
+            required_context: Rule's context requirement (string or list of strings)
+                            This is always non-None when this method is called
 
         Returns:
-            True if trigger matches
+            True if runtime context matches the requirement, False otherwise
 
         Notes:
-            - When current_trigger is None (trigger-agnostic mode), returns False
-              This ensures rules WITH trigger conditions are skipped in trigger-agnostic mode
-            - When current_trigger is a string, matches against required_trigger
+            - This method is only called when a rule HAS a context requirement (required_context is not None)
+            - If current_context is None, the rule cannot match (no runtime context to match against)
+            - If required_context is a list, checks if current_context is in that list
+            - If required_context is a string, checks for exact match
         """
-        if current_trigger is None:
-            # Trigger-agnostic mode: don't match rules with trigger conditions
+        if current_context is None:
+            # No runtime context provided, but rule requires one → no match
             return False
 
-        if isinstance(required_trigger, list):
-            return current_trigger in required_trigger
+        if isinstance(required_context, list):
+            return current_context in required_context
         else:
-            return current_trigger == required_trigger
+            return current_context == required_context
 
     def _evaluate_all(self, torrent: Dict, conditions: List[Dict]) -> bool:
         """All conditions must match (AND)"""
@@ -525,17 +531,17 @@ class RulesEngine:
         self.executor = ActionExecutor(api, dry_run)
         self.stats = RuleStats()
 
-    def run(self, trigger: Optional[str] = None, torrent_hash: Optional[str] = None):
+    def run(self, context: Optional[str] = None, torrent_hash: Optional[str] = None):
         """
         Execute rules engine
 
         Args:
-            trigger: Trigger type (on_added, on_completed, scheduled, manual)
+            context: Context type (torrent-imported, download-finished, weekly-cleanup, adhoc-run)
             torrent_hash: Optional torrent hash to process only one torrent
         """
         logger.info("=" * 60)
         logger.info("Starting qBittorrent automation engine")
-        logger.info(f"Trigger: {trigger or 'none'}")
+        logger.info(f"Context: {context or 'none'}")
         logger.info(f"Dry run mode: {self.dry_run}")
         logger.info("=" * 60)
 
@@ -548,7 +554,7 @@ class RulesEngine:
                     logger.warning(f"Torrent not found: {torrent_hash}")
                     return
             else:
-                # All torrents mode (scheduled/manual)
+                # All torrents mode (weekly-cleanup/adhoc-run)
                 torrents = self.api.get_torrents()
 
             self.stats.total_torrents = len(torrents)
@@ -574,8 +580,13 @@ class RulesEngine:
                     if torrent['hash'] in processed_torrents:
                         continue
 
+                    # Skip if torrent was deleted by a previous rule
+                    if torrent.get('_deleted'):
+                        continue
+
                     # Evaluate conditions
-                    if self.evaluator.evaluate(torrent, rule.get('conditions', {}), trigger):
+                    # Pass runtime context and rule's context requirement separately
+                    if self.evaluator.evaluate(torrent, rule.get('conditions', {}), context, rule.get('context')):
                         matched_count += 1
                         self.stats.rules_matched += 1
 
@@ -589,6 +600,21 @@ class RulesEngine:
                                     self.stats.actions_skipped += 1
                                 else:
                                     self.stats.actions_executed += 1
+
+                                    # Re-fetch torrent to update cache for subsequent rules
+                                    # This allows later rules to see changes (tags, category, etc.)
+                                    try:
+                                        updated = self.api.get_torrent(torrent['hash'])
+                                        if updated:
+                                            torrent.update(updated)
+                                            logger.debug(f"Updated cache for {torrent.get('name', 'unknown')} after action")
+                                        else:
+                                            # Torrent was deleted
+                                            logger.debug(f"Torrent {torrent['hash']} no longer exists (likely deleted)")
+                                            torrent['_deleted'] = True
+                                    except Exception as e:
+                                        logger.warning(f"Failed to update cache for {torrent['hash']}: {e}")
+                                        # Continue execution - don't fail the rule
                             else:
                                 self.stats.errors += 1
 

@@ -36,7 +36,7 @@ class TestAutoCategorizationRules:
         mock_api.torrents_data = {torrent1['hash']: torrent1, torrent2['hash']: torrent2}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='on_added')
+        engine.run(context='torrent-imported')
 
         # Only HD torrent should match
         assert engine.stats.rules_matched == 1
@@ -64,7 +64,7 @@ class TestAutoCategorizationRules:
         mock_api.torrents_data = {torrent['hash']: torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='on_added')
+        engine.run(context='torrent-imported')
 
         assert engine.stats.rules_matched == 1
         assert mock_api.calls['set_category'][0]['category'] == 'TV-Shows'
@@ -78,8 +78,8 @@ class TestCleanupRules:
         rule = {
             'name': 'Delete old seeded torrents',
             'enabled': True,
+            'context': 'weekly-cleanup',
             'conditions': {
-                'trigger': 'scheduled',
                 'all': [
                     {'field': 'info.state', 'operator': 'in', 'value': ['uploading', 'pausedUP', 'stalledUP']},
                     {'field': 'info.completion_on', 'operator': 'older_than', 'value': '30 days'},
@@ -95,7 +95,7 @@ class TestCleanupRules:
         mock_api.torrents_data = {old_seeded_torrent['hash']: old_seeded_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='scheduled')
+        engine.run(context='weekly-cleanup')
 
         assert engine.stats.rules_matched == 1
         assert len(mock_api.calls['delete']) == 1
@@ -122,7 +122,7 @@ class TestCleanupRules:
         mock_api.torrents_data = {old_seeded_torrent['hash']: old_seeded_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='scheduled')
+        engine.run(context='weekly-cleanup')
 
         assert engine.stats.rules_matched == 1
         assert len(mock_api.calls['add_tags']) == 1
@@ -163,7 +163,7 @@ class TestSeedingManagementRules:
         mock_api.torrents_data = {torrent['hash']: torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='scheduled')
+        engine.run(context='weekly-cleanup')
 
         assert engine.stats.rules_matched == 1
         assert len(mock_api.calls['force_start']) == 1
@@ -188,7 +188,7 @@ class TestSeedingManagementRules:
         mock_api.torrents_data = {seeding_torrent['hash']: seeding_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='scheduled')
+        engine.run(context='weekly-cleanup')
 
         assert engine.stats.rules_matched == 1
         assert len(mock_api.calls['stop']) == 1
@@ -202,8 +202,8 @@ class TestSizeBasedRules:
         rule = {
             'name': 'Pause very large downloads',
             'enabled': True,
+            'context': 'torrent-imported',
             'conditions': {
-                'trigger': 'on_added',
                 'all': [
                     {'field': 'info.size', 'operator': 'larger_than', 'value': '50 GB'},
                     {'field': 'info.state', 'operator': 'in', 'value': ['downloading', 'metaDL']},
@@ -219,7 +219,7 @@ class TestSizeBasedRules:
         mock_api.torrents_data = {large_torrent['hash']: large_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='on_added')
+        engine.run(context='torrent-imported')
 
         assert engine.stats.rules_matched == 1
         assert len(mock_api.calls['stop']) == 1
@@ -243,7 +243,7 @@ class TestSizeBasedRules:
         mock_api.torrents_data = {small_torrent['hash']: small_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.rules_matched == 1
 
@@ -270,7 +270,7 @@ class TestSpeedLimitRules:
         mock_api.torrents_data = {seeding_torrent['hash']: seeding_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='scheduled')
+        engine.run(context='weekly-cleanup')
 
         assert engine.stats.rules_matched == 1
         assert len(mock_api.calls['set_upload_limit']) == 1
@@ -296,7 +296,7 @@ class TestSpeedLimitRules:
         mock_api.torrents_data = {large_torrent['hash']: large_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='scheduled')
+        engine.run(context='weekly-cleanup')
 
         assert engine.stats.rules_matched == 1
 
@@ -332,7 +332,7 @@ class TestComplexConditionRules:
         }
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         # Both should match
         assert engine.stats.rules_matched == 2
@@ -356,7 +356,7 @@ class TestComplexConditionRules:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.rules_matched == 1
 
@@ -384,7 +384,7 @@ class TestMultipleActionRules:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         assert engine.stats.actions_executed == 4
 
@@ -408,23 +408,23 @@ class TestMultipleActionRules:
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
 
         # First action fails, second succeeds
         assert engine.stats.errors == 1
         assert engine.stats.actions_executed == 1
 
 
-class TestTriggerFiltering:
+class TestContextFiltering:
     """Test trigger-based rule filtering."""
 
-    def test_on_added_trigger_filtering(self, mock_api, mock_config, sample_torrent):
+    def test_on_added_context_filtering(self, mock_api, mock_config, sample_torrent):
         """Rules filter by trigger."""
         rule1 = {
             'name': 'On added rule',
             'enabled': True,
+            'context': 'torrent-imported',
             'conditions': {
-                'trigger': 'on_added',
                 'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 0}]
             },
             'actions': [{'type': 'add_tag', 'params': {'tags': ['on-added']}}]
@@ -432,30 +432,30 @@ class TestTriggerFiltering:
         rule2 = {
             'name': 'Scheduled rule',
             'enabled': True,
+            'context': 'weekly-cleanup',
             'conditions': {
-                'trigger': 'scheduled',
                 'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 0}]
             },
-            'actions': [{'type': 'add_tag', 'params': {'tags': ['scheduled']}}]
+            'actions': [{'type': 'add_tag', 'params': {'tags': ['weekly-cleanup']}}]
         }
 
         mock_config.get_rules = Mock(return_value=[rule1, rule2])
         mock_api.torrents_data = {sample_torrent['hash']: sample_torrent}
 
         engine = RulesEngine(mock_api, mock_config)
-        engine.run(trigger='on_added')
+        engine.run(context='torrent-imported')
 
-        # Only on_added rule should match
+        # Only torrent-imported rule should match
         assert engine.stats.rules_matched == 1
         assert mock_api.calls['add_tags'][0]['tags'][0] == 'on-added'
 
-    def test_multiple_trigger_values(self, mock_api, mock_config, sample_torrent):
+    def test_multiple_context_values(self, mock_api, mock_config, sample_torrent):
         """Rule can match multiple triggers."""
         rule = {
             'name': 'Multi-trigger rule',
             'enabled': True,
+            'context': ['torrent-imported', 'download-finished'],
             'conditions': {
-                'trigger': ['on_added', 'on_completed'],
                 'all': [{'field': 'info.name', 'operator': 'contains', 'value': 'Example'}]
             },
             'actions': [{'type': 'add_tag', 'params': {'tags': ['processed']}}]
@@ -466,13 +466,13 @@ class TestTriggerFiltering:
 
         engine = RulesEngine(mock_api, mock_config)
 
-        # Should match on_added
-        engine.run(trigger='on_added')
+        # Should match torrent-imported
+        engine.run(context='torrent-imported')
         assert engine.stats.rules_matched == 1
 
-        # Reset stats and test on_completed
+        # Reset stats and test download-finished
         engine.stats.rules_matched = 0
-        engine.run(trigger='on_completed')
+        engine.run(context='download-finished')
         assert engine.stats.rules_matched == 1
 
 
@@ -499,7 +499,7 @@ class TestIdempotencyInIntegration:
         engine = RulesEngine(mock_api, mock_config)
 
         # First run - executes
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
         assert engine.stats.actions_executed == 1
         assert engine.stats.actions_skipped == 0
 
@@ -508,7 +508,7 @@ class TestIdempotencyInIntegration:
 
         # Second run - skipped
         engine.stats = type(engine.stats)()  # Reset stats
-        engine.run(trigger='manual')
+        engine.run(context='adhoc-run')
         assert engine.stats.actions_executed == 0
         assert engine.stats.actions_skipped == 1
 
@@ -524,8 +524,8 @@ class TestRealWorldCompleteScenario:
                 'name': 'Auto-categorize new downloads',
                 'enabled': True,
                 'stop_on_match': False,
+                'context': 'torrent-imported',
                 'conditions': {
-                    'trigger': 'on_added',
                     'all': [{'field': 'info.name', 'operator': 'matches', 'value': r'(?i).*1080p.*'}]
                 },
                 'actions': [
@@ -537,8 +537,8 @@ class TestRealWorldCompleteScenario:
                 'name': 'Cleanup old torrents',
                 'enabled': True,
                 'stop_on_match': True,
+                'context': 'weekly-cleanup',
                 'conditions': {
-                    'trigger': 'scheduled',
                     'all': [
                         {'field': 'info.ratio', 'operator': '>=', 'value': 3.0},
                         {'field': 'info.completion_on', 'operator': 'older_than', 'value': '60 days'},
@@ -562,11 +562,238 @@ class TestRealWorldCompleteScenario:
 
         engine = RulesEngine(mock_api, mock_config)
 
-        # Simulate on_added trigger for new torrent
-        engine.run(trigger='on_added', torrent_hash='h1')
+        # Simulate torrent-imported trigger for new torrent
+        engine.run(context='torrent-imported', torrent_hash='h1')
         assert engine.stats.rules_matched == 1
 
-        # Reset and simulate scheduled trigger
+        # Reset and simulate weekly-cleanup trigger
         engine.stats = type(engine.stats)()
-        engine.run(trigger='scheduled')
+        engine.run(context='weekly-cleanup')
         assert engine.stats.rules_matched == 1  # Old torrent matches cleanup rule
+
+
+class TestRuleChainingWithCacheUpdates:
+    """Test that later rules see changes made by earlier rules in the same execution."""
+
+    def test_tag_based_rule_chaining(self, mock_api, mock_config):
+        """Later rules should see tags added by earlier rules in the same execution."""
+        # Rule 1: Tag large torrents
+        # Rule 2: Stop torrents with 'large' tag (should see tag from Rule 1)
+        rules = [
+            {
+                'name': 'Tag large torrents',
+                'enabled': True,
+                'conditions': {
+                    'all': [
+                        {'field': 'info.size', 'operator': 'larger_than', 'value': '10 GB'}
+                    ]
+                },
+                'actions': [
+                    {'type': 'add_tag', 'params': {'tags': ['large']}}
+                ]
+            },
+            {
+                'name': 'Stop large torrents',
+                'enabled': True,
+                'conditions': {
+                    'all': [
+                        {'field': 'info.tags', 'operator': 'contains', 'value': 'large'}
+                    ]
+                },
+                'actions': [
+                    {'type': 'stop'}
+                ]
+            }
+        ]
+
+        # Torrent starts without 'large' tag
+        torrent = {
+            'hash': 'h1',
+            'name': 'Big.File',
+            'size': 15000000000,  # 15 GB
+            'tags': '',  # No tags initially
+            'state': 'downloading',
+            'ratio': 0.0,
+            'category': ''
+        }
+
+        mock_config.get_rules = Mock(return_value=rules)
+        mock_api.torrents_data = {torrent['hash']: torrent}
+
+        # Mock get_torrent to return updated torrent with tag after Rule 1
+        def get_torrent_side_effect(hash):
+            if hash == 'h1':
+                # Return updated torrent with tag
+                return {
+                    'hash': 'h1',
+                    'name': 'Big.File',
+                    'size': 15000000000,
+                    'tags': 'large',  # Tag added by Rule 1
+                    'state': 'downloading',
+                    'ratio': 0.0,
+                    'category': ''
+                }
+            return None
+
+        mock_api.get_torrent = Mock(side_effect=get_torrent_side_effect)
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(context='adhoc-run')
+
+        # Both rules should match
+        assert engine.stats.rules_matched == 2, "Both Rule 1 (size check) and Rule 2 (tag check) should match"
+
+        # Rule 1 should have added the tag
+        assert len(mock_api.calls['add_tags']) == 1
+        assert 'large' in mock_api.calls['add_tags'][0]['tags']
+
+        # Rule 2 should have stopped the torrent (because it saw the tag)
+        assert len(mock_api.calls['stop']) == 1
+
+        # Cache should have been updated (get_torrent called after Rule 1 action)
+        assert mock_api.get_torrent.called
+
+    def test_multiple_tag_additions_in_sequence(self, mock_api, mock_config):
+        """Multiple rules can add tags and later rules see all accumulated tags."""
+        rules = [
+            {
+                'name': 'Tag by tracker',
+                'enabled': True,
+                'conditions': {
+                    'all': [
+                        {'field': 'trackers.url', 'operator': 'contains', 'value': 'private-tracker.com'}
+                    ]
+                },
+                'actions': [
+                    {'type': 'add_tag', 'params': {'tags': ['private']}}
+                ]
+            },
+            {
+                'name': 'Tag by size',
+                'enabled': True,
+                'conditions': {
+                    'all': [
+                        {'field': 'info.size', 'operator': 'larger_than', 'value': '5 GB'}
+                    ]
+                },
+                'actions': [
+                    {'type': 'add_tag', 'params': {'tags': ['large']}}
+                ]
+            },
+            {
+                'name': 'Force start private large torrents',
+                'enabled': True,
+                'conditions': {
+                    'all': [
+                        {'field': 'info.tags', 'operator': 'contains', 'value': 'private'},
+                        {'field': 'info.tags', 'operator': 'contains', 'value': 'large'}
+                    ]
+                },
+                'actions': [
+                    {'type': 'force_start'}
+                ]
+            }
+        ]
+
+        torrent = {
+            'hash': 'h1',
+            'name': 'Big.Private.File',
+            'size': 10000000000,  # 10 GB
+            'tags': '',
+            'state': 'paused',
+            'ratio': 0.0,
+            'category': ''
+        }
+
+        trackers = [
+            {'url': 'http://private-tracker.com/announce', 'status': 2}
+        ]
+
+        mock_config.get_rules = Mock(return_value=rules)
+        mock_api.torrents_data = {torrent['hash']: torrent}
+        mock_api.get_trackers = Mock(return_value=trackers)
+
+        # Mock get_torrent to simulate tag accumulation
+        call_count = [0]
+
+        def get_torrent_accumulate_tags(hash):
+            call_count[0] += 1
+            if hash == 'h1':
+                # First call: after 'private' tag added
+                if call_count[0] == 1:
+                    return {**torrent, 'tags': 'private'}
+                # Second call: after 'large' tag added
+                elif call_count[0] == 2:
+                    return {**torrent, 'tags': 'private,large'}
+            return None
+
+        mock_api.get_torrent = Mock(side_effect=get_torrent_accumulate_tags)
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(context='adhoc-run')
+
+        # All three rules should match
+        assert engine.stats.rules_matched == 3
+
+        # Tags should have been added by Rules 1 and 2
+        assert len(mock_api.calls['add_tags']) == 2
+
+        # Rule 3 should have force started (because both tags present)
+        assert len(mock_api.calls['force_start']) == 1
+
+    def test_deleted_torrent_skipped_by_later_rules(self, mock_api, mock_config):
+        """If a rule deletes a torrent, later rules should skip it."""
+        rules = [
+            {
+                'name': 'Delete bad torrents',
+                'enabled': True,
+                'conditions': {
+                    'all': [
+                        {'field': 'info.name', 'operator': 'contains', 'value': 'malware'}
+                    ]
+                },
+                'actions': [
+                    {'type': 'delete_torrent', 'params': {'keep_files': False}}
+                ]
+            },
+            {
+                'name': 'Tag all torrents',
+                'enabled': True,
+                'conditions': {
+                    'all': [
+                        {'field': 'info.ratio', 'operator': '>=', 'value': 0}
+                    ]
+                },
+                'actions': [
+                    {'type': 'add_tag', 'params': {'tags': ['processed']}}
+                ]
+            }
+        ]
+
+        torrent = {
+            'hash': 'h1',
+            'name': 'malware.exe',
+            'size': 1000000,
+            'tags': '',
+            'state': 'downloading',
+            'ratio': 0.5,
+            'category': ''
+        }
+
+        mock_config.get_rules = Mock(return_value=rules)
+        mock_api.torrents_data = {torrent['hash']: torrent}
+
+        # Mock get_torrent to return None after deletion
+        mock_api.get_torrent = Mock(return_value=None)
+
+        engine = RulesEngine(mock_api, mock_config)
+        engine.run(context='adhoc-run')
+
+        # Only Rule 1 should match (Rule 2 should skip deleted torrent)
+        assert engine.stats.rules_matched == 1
+
+        # Torrent should have been deleted
+        assert len(mock_api.calls['delete']) == 1
+
+        # Tag should NOT have been added (torrent was deleted)
+        assert len(mock_api.calls.get('add_tags', [])) == 0

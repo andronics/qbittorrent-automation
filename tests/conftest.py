@@ -774,7 +774,7 @@ def simple_rule() -> Dict[str, Any]:
         "enabled": True,
         "stop_on_match": False,
         "conditions": {
-            "trigger": "manual",
+            "context": "adhoc-run",
             "all": [
                 {"field": "info.ratio", "operator": ">=", "value": 1.0}
             ]
@@ -793,7 +793,7 @@ def complex_rule() -> Dict[str, Any]:
         "enabled": True,
         "stop_on_match": True,
         "conditions": {
-            "trigger": "scheduled",
+            "context": "weekly-cleanup",
             "all": [
                 {"field": "info.state", "operator": "in", "value": ["uploading", "stalledUP"]},
                 {
@@ -855,7 +855,7 @@ rules:
     enabled: true
     stop_on_match: false
     conditions:
-      trigger: manual
+      context: adhoc-run
       all:
         - field: info.ratio
           operator: ">="
@@ -867,3 +867,70 @@ rules:
 """)
 
     return config_dir
+
+
+# ============================================================================
+# Redis Test Infrastructure
+# ============================================================================
+
+@pytest.fixture(scope="session")
+def redis_available():
+    """Check if Redis is available for testing."""
+    try:
+        import redis
+        client = redis.Redis(host='localhost', port=6379, socket_connect_timeout=1)
+        client.ping()
+        client.close()
+        return True
+    except (ImportError, redis.exceptions.ConnectionError, redis.exceptions.TimeoutError):
+        return False
+
+
+@pytest.fixture
+def redis_client(redis_available):
+    """
+    Provide Redis client for testing.
+
+    Uses real Redis if available, otherwise uses fakeredis.
+    Skip tests that require real Redis if neither is available.
+    """
+    if redis_available:
+        # Use real Redis
+        import redis
+        client = redis.Redis(
+            host='localhost',
+            port=6379,
+            db=15,  # Use dedicated test database
+            decode_responses=True  # Decode to strings (matches RedisQueue expectation)
+        )
+        # Clean up test database
+        client.flushdb()
+        yield client
+        # Clean up after test
+        client.flushdb()
+        client.close()
+    else:
+        # Try to use fakeredis as fallback
+        try:
+            from fakeredis import FakeRedis
+            client = FakeRedis(decode_responses=True)  # Decode to strings
+            yield client
+        except ImportError:
+            pytest.skip("Redis not available and fakeredis not installed")
+
+
+@pytest.fixture
+def redis_url(redis_available):
+    """Provide Redis URL for testing."""
+    if redis_available:
+        return "redis://localhost:6379/15"
+    else:
+        # Return fake URL - tests using this should mock the connection
+        return "redis://localhost:6379/15"
+
+
+def pytest_configure(config):
+    """Configure pytest with custom markers and settings."""
+    config.addinivalue_line(
+        "markers", "requires_redis: mark test as requiring real Redis server"
+    )

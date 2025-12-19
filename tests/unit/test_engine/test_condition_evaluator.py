@@ -47,78 +47,74 @@ class TestConditionEvaluatorInit:
 
 
 # ============================================================================
-# Trigger Evaluation
+# Context Evaluation
 # ============================================================================
 
-class TestTriggerEvaluation:
-    """Test _evaluate_trigger() method."""
+class TestContextEvaluation:
+    """Test _evaluate_context() method."""
 
-    def test_trigger_matches_string(self, mock_api):
-        """String trigger matches exactly."""
+    def test_context_matches_string(self, mock_api):
+        """String context matches exactly."""
         evaluator = ConditionEvaluator(mock_api)
-        assert evaluator._evaluate_trigger('manual', 'manual') is True
-        assert evaluator._evaluate_trigger('scheduled', 'manual') is False
+        assert evaluator._evaluate_context('adhoc-run', 'adhoc-run') is True
+        assert evaluator._evaluate_context('weekly-cleanup', 'adhoc-run') is False
 
-    def test_trigger_matches_list(self, mock_api):
-        """Trigger matches if in list."""
+    def test_context_matches_list(self, mock_api):
+        """Context matches if in list."""
         evaluator = ConditionEvaluator(mock_api)
-        assert evaluator._evaluate_trigger('manual', ['manual', 'scheduled']) is True
-        assert evaluator._evaluate_trigger('on_added', ['manual', 'scheduled']) is False
+        assert evaluator._evaluate_context('adhoc-run', ['adhoc-run', 'weekly-cleanup']) is True
+        assert evaluator._evaluate_context('torrent-imported', ['adhoc-run', 'weekly-cleanup']) is False
 
-    def test_trigger_agnostic_mode_returns_false(self, mock_api):
-        """Trigger-agnostic mode (None) returns False."""
+    def test_context_agnostic_mode_returns_false(self, mock_api):
+        """Context-agnostic mode (None) returns False."""
         evaluator = ConditionEvaluator(mock_api)
-        assert evaluator._evaluate_trigger(None, 'manual') is False
-        assert evaluator._evaluate_trigger(None, ['manual', 'scheduled']) is False
+        assert evaluator._evaluate_context(None, 'adhoc-run') is False
+        assert evaluator._evaluate_context(None, ['adhoc-run', 'weekly-cleanup']) is False
 
     def test_evaluate_with_matching_trigger(self, mock_api, sample_torrent):
-        """evaluate() succeeds with matching trigger."""
+        """evaluate() succeeds with matching context."""
         evaluator = ConditionEvaluator(mock_api)
         conditions = {
-            'trigger': 'manual',
             'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]
         }
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run', required_context='adhoc-run')
         assert result is True
 
     def test_evaluate_with_non_matching_trigger(self, mock_api, sample_torrent):
-        """evaluate() fails with non-matching trigger."""
+        """evaluate() fails with non-matching context."""
         evaluator = ConditionEvaluator(mock_api)
         conditions = {
-            'trigger': 'scheduled',
             'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]
         }
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run', required_context='weekly-cleanup')
         assert result is False
 
-    def test_evaluate_trigger_agnostic_mode_skips_rules_with_trigger(self, mock_api, sample_torrent):
-        """Trigger-agnostic mode skips rules WITH trigger conditions."""
+    def test_evaluate_context_agnostic_mode_skips_rules_with_context(self, mock_api, sample_torrent):
+        """Context-agnostic mode skips rules WITH context conditions."""
         evaluator = ConditionEvaluator(mock_api)
         conditions = {
-            'trigger': 'manual',
             'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]
         }
-        result = evaluator.evaluate(sample_torrent, conditions, trigger=None)
+        result = evaluator.evaluate(sample_torrent, conditions, current_context=None, required_context='adhoc-run')
         assert result is False
 
-    def test_evaluate_trigger_agnostic_mode_allows_rules_without_trigger(self, mock_api, sample_torrent):
-        """Trigger-agnostic mode allows rules WITHOUT trigger conditions."""
+    def test_evaluate_context_agnostic_mode_allows_rules_without_trigger(self, mock_api, sample_torrent):
+        """Context-agnostic mode allows rules WITHOUT context requirements."""
         evaluator = ConditionEvaluator(mock_api)
         conditions = {
             'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]
         }
-        # Note: per implementation, rules without trigger will be SKIPPED in trigger-agnostic mode
-        # This is because of line 81-82 in engine.py
-        result = evaluator.evaluate(sample_torrent, conditions, trigger=None)
-        assert result is False  # Updated to match actual implementation
+        # Rules without context requirements execute regardless of runtime context
+        result = evaluator.evaluate(sample_torrent, conditions, current_context=None, required_context=None)
+        assert result is True  # Rule without context executes even when runtime context is None
 
-    def test_evaluate_no_trigger_condition_with_trigger_set(self, mock_api, sample_torrent):
-        """Rules without trigger condition match when trigger is set."""
+    def test_evaluate_no_context_condition_with_context_set(self, mock_api, sample_torrent):
+        """Rules without context condition match when context is set."""
         evaluator = ConditionEvaluator(mock_api)
         conditions = {
             'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]
         }
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run', required_context=None)
         assert result is True
 
 
@@ -137,7 +133,7 @@ class TestLogicalGroups:
             {'field': 'info.ratio', 'operator': '>=', 'value': 1.0},
             {'field': 'info.state', 'operator': '==', 'value': 'uploading'},
         ]}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is True
 
     def test_all_with_one_condition_false(self, mock_api, sample_torrent):
@@ -147,14 +143,14 @@ class TestLogicalGroups:
             {'field': 'info.ratio', 'operator': '>=', 'value': 1.0},
             {'field': 'info.state', 'operator': '==', 'value': 'downloading'},  # False
         ]}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is False
 
     def test_all_empty_list(self, mock_api, sample_torrent):
         """all: empty list returns True (vacuous truth)."""
         evaluator = ConditionEvaluator(mock_api)
         conditions = {'all': []}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is True
 
     def test_all_single_condition(self, mock_api, sample_torrent):
@@ -163,7 +159,7 @@ class TestLogicalGroups:
         conditions = {'all': [
             {'field': 'info.ratio', 'operator': '>=', 'value': 1.0},
         ]}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is True
 
     # _evaluate_any() - OR logic
@@ -174,7 +170,7 @@ class TestLogicalGroups:
             {'field': 'info.ratio', 'operator': '>=', 'value': 10.0},  # False
             {'field': 'info.state', 'operator': '==', 'value': 'uploading'},  # True
         ]}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is True
 
     def test_any_with_all_conditions_false(self, mock_api, sample_torrent):
@@ -184,14 +180,14 @@ class TestLogicalGroups:
             {'field': 'info.ratio', 'operator': '>=', 'value': 10.0},  # False
             {'field': 'info.state', 'operator': '==', 'value': 'downloading'},  # False
         ]}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is False
 
     def test_any_empty_list(self, mock_api, sample_torrent):
         """any: empty list returns False."""
         evaluator = ConditionEvaluator(mock_api)
         conditions = {'any': []}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is False
 
     def test_any_all_conditions_true(self, mock_api, sample_torrent):
@@ -201,7 +197,7 @@ class TestLogicalGroups:
             {'field': 'info.ratio', 'operator': '>=', 'value': 1.0},
             {'field': 'info.state', 'operator': '==', 'value': 'uploading'},
         ]}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is True
 
     # _evaluate_none() - NOT logic
@@ -212,7 +208,7 @@ class TestLogicalGroups:
             {'field': 'info.ratio', 'operator': '>=', 'value': 10.0},  # False
             {'field': 'info.state', 'operator': '==', 'value': 'downloading'},  # False
         ]}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is True
 
     def test_none_with_one_condition_true(self, mock_api, sample_torrent):
@@ -222,14 +218,14 @@ class TestLogicalGroups:
             {'field': 'info.ratio', 'operator': '>=', 'value': 1.0},  # True
             {'field': 'info.state', 'operator': '==', 'value': 'downloading'},  # False
         ]}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is False
 
     def test_none_empty_list(self, mock_api, sample_torrent):
         """none: empty list returns True."""
         evaluator = ConditionEvaluator(mock_api)
         conditions = {'none': []}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is True
 
     def test_combined_logical_groups(self, mock_api, sample_torrent):
@@ -247,7 +243,7 @@ class TestLogicalGroups:
                 {'field': 'info.ratio', 'operator': '<', 'value': 0.5},  # False
             ]
         }
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is True
 
     def test_nested_all_operator(self, mock_api, sample_torrent):
@@ -261,7 +257,7 @@ class TestLogicalGroups:
             ]},
             {'field': 'info.ratio', 'operator': '<', 'value': 0.1},  # False
         ]}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is True
 
     def test_nested_any_operator(self, mock_api, sample_torrent):
@@ -275,7 +271,7 @@ class TestLogicalGroups:
                 {'field': 'info.state', 'operator': '==', 'value': 'downloading'},  # False
             ]}
         ]}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is True
 
     def test_nested_none_operator(self, mock_api, sample_torrent):
@@ -289,7 +285,7 @@ class TestLogicalGroups:
                 {'field': 'info.ratio', 'operator': '<', 'value': 0.5},  # False
             ]}
         ]}
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is True
 
 
@@ -782,7 +778,7 @@ class TestEvaluationErrorHandling:
             ]
         }
 
-        result = evaluator.evaluate(sample_torrent, conditions, trigger='manual')
+        result = evaluator.evaluate(sample_torrent, conditions, current_context='adhoc-run')
         assert result is False
 
     def test_numeric_comparison_non_numeric_values(self, mock_api):
