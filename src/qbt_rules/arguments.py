@@ -41,21 +41,42 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
+    # Mode selection
     parser.add_argument(
-        '--trigger',
+        '--serve',
+        action='store_true',
+        help='Run in server mode (HTTP API + worker)'
+    )
+
+    # Execution arguments (client mode)
+    parser.add_argument(
+        '--context',
         type=str,
         default=None,
-        help='Trigger name (manual, scheduled, on_added, on_completed, or custom). Defaults to "manual" unless --torrent-hash is provided without --trigger.',
-        metavar="TRIGGER"
+        help='Context filter for rules (any custom string identifier you define)',
+        metavar="CONTEXT"
+    )
+
+    parser.add_argument(
+        '--hash',
+        type=str,
+        default=None,
+        help='Torrent hash to process (40-character hex string)',
+        metavar="HASH"
+    )
+
+    parser.add_argument(
+        '--wait',
+        action='store_true',
+        help='Wait for job to complete (polls server for status)'
     )
 
     parser.add_argument(
         '--torrent-hash',
         type=str,
         default=None,
-        dest='torrent_hash',
-        help='Torrent hash to process (40-character hex string). When provided without --trigger, runs only rules with no trigger condition.',
-        metavar="HASH"
+        dest='hash',  # Map to hash
+        help=argparse.SUPPRESS  # Hidden, for backward compatibility
     )
 
     # Common configuration arguments
@@ -86,6 +107,115 @@ def create_parser() -> argparse.ArgumentParser:
         help='Enable trace mode with detailed logging (module/function/line)'
     )
 
+    # Server configuration (for --serve mode)
+    parser.add_argument(
+        '--server-host',
+        type=str,
+        help='Server bind address (default: 0.0.0.0)',
+        metavar="HOST"
+    )
+
+    parser.add_argument(
+        '--server-port',
+        type=int,
+        help='Server port (default: 5000)',
+        metavar="PORT"
+    )
+
+    parser.add_argument(
+        '--server-api-key',
+        type=str,
+        help='Server API key for authentication',
+        metavar="KEY"
+    )
+
+    parser.add_argument(
+        '--server-workers',
+        type=int,
+        help='Gunicorn worker processes (default: 1)',
+        metavar="NUM"
+    )
+
+    # Client configuration (for client mode)
+    parser.add_argument(
+        '--client-server-url',
+        type=str,
+        help='Server URL for client (default: http://localhost:5000)',
+        metavar="URL"
+    )
+
+    parser.add_argument(
+        '--client-api-key',
+        type=str,
+        help='Client API key for authentication',
+        metavar="KEY"
+    )
+
+    # Queue configuration (for --serve mode)
+    parser.add_argument(
+        '--queue-backend',
+        choices=['sqlite', 'redis'],
+        help='Queue backend (default: sqlite)',
+        metavar="BACKEND"
+    )
+
+    parser.add_argument(
+        '--queue-sqlite-path',
+        type=str,
+        help='SQLite database path (default: /config/qbt-rules.db)',
+        metavar="PATH"
+    )
+
+    parser.add_argument(
+        '--queue-redis-url',
+        type=str,
+        help='Redis connection URL (default: redis://localhost:6379/0)',
+        metavar="URL"
+    )
+
+    # Job management commands
+    parser.add_argument(
+        '--list-jobs',
+        action='store_true',
+        help='List recent jobs'
+    )
+
+    parser.add_argument(
+        '--job-status',
+        type=str,
+        metavar="JOB_ID",
+        help='Get status of specific job'
+    )
+
+    parser.add_argument(
+        '--cancel-job',
+        type=str,
+        metavar="JOB_ID",
+        dest='cancel_job_id',
+        help='Cancel pending job'
+    )
+
+    parser.add_argument(
+        '--stats',
+        action='store_true',
+        help='Get server statistics'
+    )
+
+    parser.add_argument(
+        '--status-filter',
+        choices=['pending', 'processing', 'completed', 'failed', 'cancelled'],
+        help='Filter jobs by status (for --list-jobs)',
+        metavar="STATUS"
+    )
+
+    parser.add_argument(
+        '--limit',
+        type=int,
+        default=20,
+        help='Limit number of results (for --list-jobs, default: 20)',
+        metavar="NUM"
+    )
+
     # Utility arguments
     parser.add_argument(
         '--version',
@@ -111,29 +241,66 @@ def create_parser() -> argparse.ArgumentParser:
     parser.epilog = '''
 Examples:
 
-  # Run with default manual trigger
-  qbt-rules
+  Server Mode:
+    # Start server with default settings
+    qbt-rules --serve
 
-  # Run with specific trigger
-  qbt-rules --trigger scheduled
+    # Start server with custom port and API key
+    qbt-rules --serve --server-port 8080 --server-api-key my-secret-key
 
-  # Use custom trigger name
-  qbt-rules --trigger my_custom_trigger
+    # Start server with Redis queue backend
+    qbt-rules --serve --queue-backend redis --queue-redis-url redis://localhost:6379/0
 
-  # Process specific torrent (trigger-agnostic mode - runs rules with no trigger condition)
-  qbt-rules --torrent-hash abc123def456...
+  Client Mode (submit jobs):
+    # Execute with context filter (use any custom string you define)
+    qbt-rules --context weekly-cleanup
 
-  # Process specific torrent with trigger
-  qbt-rules --trigger on_completed --torrent-hash abc123def456...
+    # Execute specific torrent
+    qbt-rules --context download-finished --hash abc123def456...
 
-  # Run in dry-run mode
-  qbt-rules --dry-run --trigger manual
+    # Execute and wait for completion
+    qbt-rules --context nightly-maintenance --wait
 
-  # Validate configuration
-  qbt-rules --validate
+    # Use custom server URL
+    qbt-rules --context import-complete --client-server-url http://remote-server:5000
 
-  # List all rules
-  qbt-rules --list-rules
+  Job Management:
+    # List recent jobs
+    qbt-rules --list-jobs
+
+    # List pending jobs only
+    qbt-rules --list-jobs --status-filter pending
+
+    # Get job status
+    qbt-rules --job-status <job-id>
+
+    # Cancel pending job
+    qbt-rules --cancel-job <job-id>
+
+    # Get server statistics
+    qbt-rules --stats
+
+  Utility Commands:
+    # Validate configuration
+    qbt-rules --validate
+
+    # List all rules
+    qbt-rules --list-rules
+
+    # Show version
+    qbt-rules --version
+
+Environment Variables:
+  All CLI options support environment variables with QBT_RULES_* prefix.
+  Use _FILE suffix for any variable to read from file (Docker secrets).
+
+  Examples:
+    QBT_RULES_SERVER_API_KEY=my-key
+    QBT_RULES_SERVER_API_KEY_FILE=/run/secrets/api_key
+    QBT_RULES_CLIENT_SERVER_URL=http://localhost:5000
+    QBT_RULES_QUEUE_BACKEND=sqlite
+
+See PLAN.md or config.default.yml for complete configuration reference.
     '''
 
 
@@ -265,22 +432,21 @@ def handle_utility_args(args: argparse.Namespace, config) -> bool:
 
         # Rules execute in file order (no sorting)
         logger.info(f"\nRules ({len(rules)} total, execute in file order):\n")
-        logger.info(f"{'#':<5} {'Enabled':<10} {'Stop':<8} {'Trigger':<15} {'Name'}")
+        logger.info(f"{'#':<5} {'Enabled':<10} {'Stop':<8} {'Context':<15} {'Name'}")
         logger.info("-" * 80)
 
         for index, rule in enumerate(rules, 1):
             enabled = '✓' if rule.get('enabled', True) else '✗'
             stop = '✓' if rule.get('stop_on_match', False) else '-'
 
-            # Get trigger filter
-            conditions = rule.get('conditions', {})
-            trigger_filter = conditions.get('trigger', 'all')
-            if isinstance(trigger_filter, list):
-                trigger_filter = ','.join(trigger_filter)
+            # Get context filter (from rule level)
+            context_filter = rule.get('context', 'any')
+            if isinstance(context_filter, list):
+                context_filter = ','.join(context_filter)
 
             name = rule.get('name', 'Unnamed')
 
-            logger.info(f"{index:<5} {enabled:<10} {stop:<8} {trigger_filter:<15} {name}")
+            logger.info(f"{index:<5} {enabled:<10} {stop:<8} {context_filter:<15} {name}")
 
         logger.info("")
         return True
