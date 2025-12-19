@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2025-12-19
+
 ### Added
 - **Automatic Default Config Creation**: On first run, default `config.yml` and `rules.yml` files are automatically copied from `/usr/share/qbt-rules/` to the config directory if they don't exist. This eliminates manual configuration file setup for new users.
 - **HTTP Access Log Control**: Added `logging.http_access` configuration option (default: false) to suppress Docker health check logs from polluting console output. Set to `true` for debugging.
