@@ -430,6 +430,9 @@ class Config:
         self._load_config()
         self._load_rules()
 
+        # Track rules file modification time for hot-reload
+        self._rules_mtime = None
+
     def _load_config(self):
         """Load config.yml with environment variable expansion"""
         logging.debug(f"Loading config from {self.config_file}")
@@ -567,7 +570,32 @@ class Config:
         return bool(config_value)
 
     def get_rules(self) -> list:
-        """Get list of rules"""
+        """
+        Get list of rules with hot-reload support
+
+        Re-reads rules.yml if the file has been modified since last load.
+        This allows rules to be updated without restarting the server.
+
+        Returns:
+            List of rule dictionaries
+
+        Note:
+            If reload fails (syntax error, file deleted, etc.), the previously
+            loaded rules are retained and a warning is logged.
+        """
+        try:
+            # Check if rules file has been modified
+            current_mtime = self.rules_file.stat().st_mtime
+
+            # Reload if file changed or first load after init
+            if self._rules_mtime is None or current_mtime > self._rules_mtime:
+                self._load_rules()
+                self._rules_mtime = current_mtime
+                logging.info(f"Rules reloaded from {self.rules_file}")
+        except Exception as e:
+            # Keep existing rules on error - graceful degradation
+            logging.warning(f"Failed to reload rules from {self.rules_file}: {e}. Using cached rules.")
+
         return self.rules
 
 

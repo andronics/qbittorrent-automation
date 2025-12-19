@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Hot-Reload Rules**: Rules file (`rules.yml`) is now automatically reloaded when modified, without requiring server restart. The system checks file modification time on each job execution and reloads only when changed. Graceful error handling ensures the server continues using cached rules if the reload fails (e.g., syntax errors).
+
 ## [0.4.1] - 2025-12-19
 
 ### Added
