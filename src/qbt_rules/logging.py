@@ -59,7 +59,9 @@ def setup_logging(config: 'Config', trace_mode: bool = False):
     logger.setLevel(logging.DEBUG)
 
     # Clear existing handlers to avoid duplicates
-    logger.handlers.clear()
+    for handler in logger.handlers[:]:  # Iterate over copy
+        handler.close()
+        logger.removeHandler(handler)
 
     if file_handler:
         logger.addHandler(file_handler)

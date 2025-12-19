@@ -72,17 +72,17 @@ class TestCreateParser:
         assert parser is not None
         assert hasattr(parser, 'parse_args')
 
-    def test_parser_has_trigger_argument(self):
-        """Parser includes --trigger argument."""
+    def test_parser_has_context_argument(self):
+        """Parser includes --context argument."""
         parser = create_parser()
-        args = parser.parse_args(['--trigger', 'manual'])
-        assert args.trigger == 'manual'
+        args = parser.parse_args(['--context', 'adhoc-run'])
+        assert args.context == 'adhoc-run'
 
     def test_parser_has_torrent_hash_argument(self):
-        """Parser includes --torrent-hash argument."""
+        """Parser includes --hash argument."""
         parser = create_parser()
-        args = parser.parse_args(['--torrent-hash', 'a' * 40])
-        assert args.torrent_hash == 'a' * 40
+        args = parser.parse_args(['--hash', 'a' * 40])
+        assert args.hash == 'a' * 40
 
     def test_parser_has_config_dir_argument(self):
         """Parser includes --config-dir argument."""
@@ -471,7 +471,7 @@ class TestHandleUtilityArgs:
                 'name': 'Test Rule',
                 'enabled': True,
                 'stop_on_match': False,
-                'conditions': {'trigger': 'manual', 'all': []},
+                'conditions': {'trigger': 'adhoc-run', 'all': []},
                 'actions': []
             }
         ]
@@ -497,7 +497,7 @@ class TestHandleUtilityArgs:
 
         # Should process both rules
 
-    def test_list_rules_with_trigger_filter(self):
+    def test_list_rules_with_context_filter(self):
         """list_rules shows trigger filter."""
         args = Mock()
         args.validate = False
@@ -505,9 +505,9 @@ class TestHandleUtilityArgs:
 
         mock_config = Mock()
         mock_config.get_rules.return_value = [
-            {'name': 'Manual Rule', 'enabled': True, 'conditions': {'trigger': 'manual'}, 'actions': []},
-            {'name': 'Multi Trigger', 'enabled': True, 'conditions': {'trigger': ['manual', 'scheduled']}, 'actions': []},
-            {'name': 'No Trigger', 'enabled': True, 'conditions': {}, 'actions': []},
+            {'name': 'Manual Rule', 'enabled': True, 'conditions': {'trigger': 'adhoc-run'}, 'actions': []},
+            {'name': 'Multi Context', 'enabled': True, 'conditions': {'trigger': ['adhoc-run', 'weekly-cleanup']}, 'actions': []},
+            {'name': 'No Context', 'enabled': True, 'conditions': {}, 'actions': []},
         ]
 
         handle_utility_args(args, mock_config)
