@@ -9,6 +9,7 @@ from qbt_rules.errors import (
     InvalidVariableError,
     UnknownVariableError,
     CircularRefError,
+    RefTypeMismatchError,
 )
 
 
@@ -574,6 +575,430 @@ class TestCircularReferenceDetection:
 
         with pytest.raises(CircularRefError):
             resolver.resolve_rule(rule)
+
+
+class TestRefTypeValidation:
+    """Test ref type validation in different contexts"""
+
+    def test_action_ref_in_conditions_raises_error(self):
+        """Should reject actions.* ref used in conditions block"""
+        refs = {
+            'conditions': {
+                'good-condition': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]}
+            },
+            'actions': {
+                'my-action': [{'type': 'stop'}]
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [{'$ref': 'actions.my-action'}],  # WRONG: action ref in conditions
+            'actions': []
+        }
+
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        error = exc_info.value
+        # Verify error message contains key information
+        assert 'actions.my-action' in str(error)
+        assert 'conditions' in str(error).lower()
+        assert "rules['test-rule'].conditions" in str(error)
+
+    def test_condition_ref_in_actions_raises_error(self):
+        """Should reject conditions.* ref used in actions block"""
+        refs = {
+            'conditions': {
+                'my-condition': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]}
+            },
+            'actions': {
+                'good-action': [{'type': 'stop'}]
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [],
+            'actions': [{'$ref': 'conditions.my-condition'}]  # WRONG: condition ref in actions
+        }
+
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        error = exc_info.value
+        assert 'conditions.my-condition' in str(error)
+        assert 'actions' in str(error).lower()
+        assert "rules['test-rule'].actions" in str(error)
+
+    def test_correct_condition_ref_in_conditions_works(self):
+        """Should allow conditions.* ref in conditions block"""
+        refs = {
+            'conditions': {
+                'my-condition': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]}
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [{'$ref': 'conditions.my-condition'}],
+            'actions': []
+        }
+
+        # Should not raise
+        resolved = resolver.resolve_rule(rule)
+        assert 'all' in resolved['conditions'][0]
+        assert resolved['conditions'][0]['all'][0]['value'] == 1.0
+
+    def test_correct_action_ref_in_actions_works(self):
+        """Should allow actions.* ref in actions block"""
+        refs = {
+            'actions': {
+                'my-action': [{'type': 'stop'}, {'type': 'pause'}]
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [],
+            'actions': [{'$ref': 'actions.my-action'}]
+        }
+
+        # Should not raise
+        resolved = resolver.resolve_rule(rule)
+        assert isinstance(resolved['actions'][0], list)
+        assert len(resolved['actions'][0]) == 2
+
+    def test_nested_wrong_ref_caught(self):
+        """Should catch wrong ref type even when nested in logical operators"""
+        refs = {
+            'actions': {
+                'my-action': [{'type': 'stop'}]
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [
+                {'all': [
+                    {'any': [
+                        {'$ref': 'actions.my-action'}  # Nested wrong ref
+                    ]}
+                ]}
+            ],
+            'actions': []
+        }
+
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        error = exc_info.value
+        assert 'actions.my-action' in str(error)
+
+    def test_deeply_nested_wrong_ref_caught(self):
+        """Should catch wrong ref type at any nesting depth"""
+        refs = {
+            'conditions': {
+                'my-condition': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]}
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [],
+            'actions': [
+                {'type': 'add_tag', 'params': {'tags': ['test']}},
+                [
+                    {'type': 'stop'},
+                    [
+                        {'$ref': 'conditions.my-condition'}  # Deeply nested wrong ref
+                    ]
+                ]
+            ]
+        }
+
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        error = exc_info.value
+        assert 'conditions.my-condition' in str(error)
+
+    def test_error_shows_available_refs_of_correct_type(self):
+        """Error message should list available refs of the correct type"""
+        refs = {
+            'conditions': {
+                'ratio-check': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]},
+                'category-check': {'all': [{'field': 'info.category', 'operator': '==', 'value': 'movies'}]},
+                'tracker-check': {'all': [{'field': 'trackers.url', 'operator': 'contains', 'value': 'private'}]}
+            },
+            'actions': {
+                'wrong-action': [{'type': 'stop'}]
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [{'$ref': 'actions.wrong-action'}],
+            'actions': []
+        }
+
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        error_msg = str(exc_info.value)
+        # Should show available conditions
+        assert 'ratio-check' in error_msg
+        assert 'category-check' in error_msg
+        assert 'tracker-check' in error_msg
+
+    def test_error_shows_correct_location_path(self):
+        """Error message should show precise location of the invalid ref"""
+        refs = {
+            'actions': {
+                'my-action': [{'type': 'stop'}]
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'my-test-rule',
+            'conditions': [{'$ref': 'actions.my-action'}],
+            'actions': []
+        }
+
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        error_msg = str(exc_info.value)
+        # Should show the exact location
+        assert "rules['my-test-rule'].conditions" in error_msg
+
+    def test_error_shows_expected_vs_actual_groups(self):
+        """Error message should clearly show expected vs actual ref groups"""
+        refs = {
+            'conditions': {
+                'my-condition': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]}
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [],
+            'actions': [{'$ref': 'conditions.my-condition'}]
+        }
+
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        error_msg = str(exc_info.value)
+        # Should show both expected and actual
+        assert 'actions.*' in error_msg.lower() or 'actions' in error_msg.lower()
+        assert 'conditions.*' in error_msg.lower() or 'conditions' in error_msg.lower()
+
+    def test_multiple_wrong_refs_first_one_caught(self):
+        """When multiple wrong refs exist, should catch the first one encountered"""
+        refs = {
+            'actions': {
+                'action1': [{'type': 'stop'}],
+                'action2': [{'type': 'pause'}]
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [
+                {'$ref': 'actions.action1'},  # First wrong ref
+                {'$ref': 'actions.action2'}   # Second wrong ref
+            ],
+            'actions': []
+        }
+
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        # Should mention the first wrong ref
+        assert 'actions.action1' in str(exc_info.value)
+
+    def test_mixed_correct_and_wrong_refs(self):
+        """Should allow correct refs but reject wrong ones"""
+        refs = {
+            'conditions': {
+                'good-condition': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]}
+            },
+            'actions': {
+                'wrong-in-conditions': [{'type': 'stop'}],
+                'good-action': [{'type': 'pause'}]
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        # First verify correct usage works
+        good_rule = {
+            'name': 'good-rule',
+            'conditions': [{'$ref': 'conditions.good-condition'}],
+            'actions': [{'$ref': 'actions.good-action'}]
+        }
+        resolved = resolver.resolve_rule(good_rule)
+        assert 'all' in resolved['conditions'][0]
+        assert isinstance(resolved['actions'][0], list)
+
+        # Now verify wrong ref is caught
+        bad_rule = {
+            'name': 'bad-rule',
+            'conditions': [
+                {'$ref': 'conditions.good-condition'},  # OK
+                {'$ref': 'actions.wrong-in-conditions'}  # ERROR
+            ],
+            'actions': []
+        }
+
+        with pytest.raises(RefTypeMismatchError):
+            resolver.resolve_rule(bad_rule)
+
+    def test_ref_in_other_fields_no_validation(self):
+        """Refs in non-conditions/actions fields should not be type-validated"""
+        refs = {
+            'conditions': {
+                'my-condition': {'all': [{'field': 'info.ratio', 'operator': '>=', 'value': 1.0}]}
+            },
+            'actions': {
+                'my-action': [{'type': 'stop'}]
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        # Custom field with any ref type should work
+        rule = {
+            'name': 'test-rule',
+            'conditions': [],
+            'actions': [],
+            'custom_metadata': {
+                'condition_ref': {'$ref': 'conditions.my-condition'},
+                'action_ref': {'$ref': 'actions.my-action'}
+            }
+        }
+
+        # Should not raise - custom fields don't have type restrictions
+        resolved = resolver.resolve_rule(rule)
+        assert 'all' in resolved['custom_metadata']['condition_ref']
+        assert isinstance(resolved['custom_metadata']['action_ref'], list)
+
+    def test_transitive_wrong_ref_caught(self):
+        """Should catch wrong ref type even when it comes through another ref"""
+        refs = {
+            'conditions': {
+                'has-wrong-ref': {
+                    'all': [
+                        {'$ref': 'actions.my-action'}  # Wrong ref inside condition definition
+                    ]
+                }
+            },
+            'actions': {
+                'my-action': [{'type': 'stop'}]
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [{'$ref': 'conditions.has-wrong-ref'}],
+            'actions': []
+        }
+
+        # Should catch the nested wrong ref
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        assert 'actions.my-action' in str(exc_info.value)
+
+    def test_no_available_refs_message(self):
+        """Error message should handle case when no refs of correct type are defined"""
+        refs = {
+            'actions': {
+                'my-action': [{'type': 'stop'}]
+            }
+            # No conditions defined
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [{'$ref': 'actions.my-action'}],
+            'actions': []
+        }
+
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        error_msg = str(exc_info.value)
+        # Should indicate no conditions are available
+        assert 'none defined' in error_msg.lower() or '(none' in error_msg.lower()
+
+    def test_path_tracking_through_nested_structures(self):
+        """Path tracking should be accurate through complex nested structures"""
+        refs = {
+            'actions': {
+                'my-action': [{'type': 'stop'}]
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'complex-rule',
+            'conditions': [
+                {'all': [
+                    {'any': [
+                        {'none': [
+                            {'$ref': 'actions.my-action'}  # Deep in nesting
+                        ]}
+                    ]}
+                ]}
+            ],
+            'actions': []
+        }
+
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        error_msg = str(exc_info.value)
+        # Should still show it's in the conditions block
+        assert "rules['complex-rule'].conditions" in error_msg
+
+    def test_wrong_ref_with_variables_in_same_rule(self):
+        """Should catch type errors even when variables are also being resolved"""
+        refs = {
+            'vars': {'min_ratio': 1.0},
+            'conditions': {
+                'my-condition': {
+                    'all': [{'field': 'info.ratio', 'operator': '>=', 'value': '${vars.min_ratio}'}]
+                }
+            }
+        }
+        resolver = RuleResolver(refs=refs)
+
+        rule = {
+            'name': 'test-rule',
+            'conditions': [],
+            'actions': [
+                {'type': 'add_tag', 'params': {'tags': ['test']}},
+                {'$ref': 'conditions.my-condition'}  # Wrong type
+            ]
+        }
+
+        # Should catch the type error before variable substitution
+        with pytest.raises(RefTypeMismatchError) as exc_info:
+            resolver.resolve_rule(rule)
+
+        assert 'conditions.my-condition' in str(exc_info.value)
 
 
 class TestComplexScenarios:

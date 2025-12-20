@@ -17,6 +17,7 @@ from qbt_rules.errors import (
     CircularRefError,
     InvalidRefError,
     InvalidVariableError,
+    RefTypeMismatchError,
     UnknownRefError,
     UnknownVariableError,
 )
@@ -98,12 +99,42 @@ class RuleResolver:
             InvalidVariableError: Invalid variable path format
             UnknownVariableError: Variable not found in refs.vars
             CircularRefError: Circular reference dependency detected
+            RefTypeMismatchError: Reference type does not match context
         """
         # Phase 1: Deep copy to avoid mutating original
         resolved = copy.deepcopy(rule)
 
-        # Phase 2: Expand all $ref references (recursive)
-        resolved = self._expand_refs(resolved, ref_stack=set(), allow_conditions=True, allow_actions=True)
+        # Get rule name for error messages
+        rule_name = rule.get('name', 'unknown')
+
+        # Phase 2: Expand $ref references with context validation
+        # Process conditions separately (only allow conditions.* refs)
+        if 'conditions' in resolved:
+            resolved['conditions'] = self._expand_refs(
+                resolved['conditions'],
+                ref_stack=set(),
+                allowed_groups=['conditions'],
+                path=f"rules['{rule_name}'].conditions"
+            )
+
+        # Process actions separately (only allow actions.* refs)
+        if 'actions' in resolved:
+            resolved['actions'] = self._expand_refs(
+                resolved['actions'],
+                ref_stack=set(),
+                allowed_groups=['actions'],
+                path=f"rules['{rule_name}'].actions"
+            )
+
+        # Process other fields without ref type restrictions
+        for key in resolved:
+            if key not in ('conditions', 'actions', 'name'):
+                resolved[key] = self._expand_refs(
+                    resolved[key],
+                    ref_stack=set(),
+                    allowed_groups=None,  # No restrictions for other fields
+                    path=f"rules['{rule_name}'].{key}"
+                )
 
         # Phase 3: Substitute all ${vars.*} variables (type-aware)
         resolved = self._substitute_vars(resolved)
@@ -114,8 +145,8 @@ class RuleResolver:
         self,
         node: Any,
         ref_stack: Set[str],
-        allow_conditions: bool = True,
-        allow_actions: bool = True
+        allowed_groups: Optional[List[str]] = None,
+        path: str = ""
     ) -> Any:
         """
         Recursively expand $ref references in a data structure
@@ -123,11 +154,15 @@ class RuleResolver:
         Args:
             node: Current node being processed (dict, list, or scalar)
             ref_stack: Stack of reference paths to detect circular dependencies
-            allow_conditions: Whether condition refs are allowed in this context
-            allow_actions: Whether action refs are allowed in this context
+            allowed_groups: List of allowed ref groups (e.g., ['conditions', 'actions'])
+                          None = no restrictions (used for vars and other contexts)
+            path: Current path in the rule for error messages (e.g., "rules['test'].conditions[0]")
 
         Returns:
             Node with all $ref references expanded
+
+        Raises:
+            RefTypeMismatchError: Reference type does not match allowed_groups
         """
         if isinstance(node, dict):
             # Check if this dict is a $ref node
@@ -141,28 +176,66 @@ class RuleResolver:
                         reason="Path must be in format 'group.name'"
                     )
 
+                # Extract ref group (e.g., 'conditions' from 'conditions.private-tracker')
+                ref_group = ref_path.split('.', 1)[0]
+
+                # First, validate that the group is a known group
+                valid_groups = ['conditions', 'actions']
+                if ref_group not in valid_groups:
+                    raise InvalidRefError(
+                        ref_path=ref_path,
+                        reason=f"Unknown group '{ref_group}'. Valid groups: conditions, actions"
+                    )
+
+                # Then, validate ref type against allowed_groups (context validation)
+                if allowed_groups is not None and ref_group not in allowed_groups:
+                    # Get available refs of the correct type
+                    available_refs = []
+                    if 'conditions' in allowed_groups and hasattr(self, 'conditions'):
+                        available_refs = list(self.conditions.keys())
+                    elif 'actions' in allowed_groups and hasattr(self, 'actions'):
+                        available_refs = list(self.actions.keys())
+
+                    raise RefTypeMismatchError(
+                        ref_path=ref_path,
+                        allowed_groups=allowed_groups,
+                        actual_group=ref_group,
+                        location=path,
+                        available_refs=available_refs
+                    )
+
                 # Detect circular dependencies
                 if ref_path in ref_stack:
                     raise CircularRefError(ref_path=ref_path, ref_stack=list(ref_stack))
 
                 # Look up and expand reference
-                expanded = self._lookup_ref(ref_path, allow_conditions, allow_actions)
+                expanded = self._lookup_ref(ref_path)
 
                 # Recursively expand the referenced content
                 new_stack = ref_stack | {ref_path}
-                return self._expand_refs(expanded, new_stack, allow_conditions, allow_actions)
+                return self._expand_refs(expanded, new_stack, allowed_groups, path)
             else:
                 # Regular dict - recursively process each value
                 return {
-                    key: self._expand_refs(value, ref_stack, allow_conditions, allow_actions)
+                    key: self._expand_refs(
+                        value,
+                        ref_stack,
+                        allowed_groups,
+                        f"{path}.{key}" if path else key
+                    )
                     for key, value in node.items()
                 }
 
         elif isinstance(node, list):
             # Recursively process each list item
             return [
-                self._expand_refs(item, ref_stack, allow_conditions, allow_actions)
-                for item in node
+                self._expand_refs(
+                    item,
+                    ref_stack,
+                    allowed_groups,
+                    f"{path}[{i}]"
+                )
+                for i, item in enumerate(node)
             ]
 
         else:
@@ -209,21 +282,23 @@ class RuleResolver:
             # Scalar non-string value - return as-is
             return node
 
-    def _lookup_ref(self, ref_path: str, allow_conditions: bool, allow_actions: bool) -> Any:
+    def _lookup_ref(self, ref_path: str) -> Any:
         """
         Look up a reference by dot-notation path
 
         Args:
             ref_path: Reference path like 'conditions.private-tracker'
-            allow_conditions: Whether condition refs are allowed
-            allow_actions: Whether action refs are allowed
 
         Returns:
             Referenced structure
 
         Raises:
-            InvalidRefError: Invalid path format or disallowed group
+            InvalidRefError: Invalid path format or unknown group
             UnknownRefError: Reference not found
+
+        Note:
+            Context validation (e.g., ensuring actions.* refs aren't used in conditions)
+            is handled by _expand_refs() before calling this method.
         """
         parts = ref_path.split('.', 1)
         if len(parts) != 2:
@@ -235,21 +310,11 @@ class RuleResolver:
         group, name = parts
 
         if group == 'conditions':
-            if not allow_conditions:
-                raise InvalidRefError(
-                    ref_path=ref_path,
-                    reason="Condition references not allowed in this context"
-                )
             if name not in self.conditions:
                 raise UnknownRefError(ref_path=ref_path, available_refs=list(self.conditions.keys()))
             return self.conditions[name]
 
         elif group == 'actions':
-            if not allow_actions:
-                raise InvalidRefError(
-                    ref_path=ref_path,
-                    reason="Action references not allowed in this context"
-                )
             if name not in self.actions:
                 raise UnknownRefError(ref_path=ref_path, available_refs=list(self.actions.keys()))
             return self.actions[name]

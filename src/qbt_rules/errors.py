@@ -244,6 +244,37 @@ class CircularRefError(ResolverError):
         )
 
 
+class RefTypeMismatchError(ResolverError):
+    """Reference type does not match context"""
+
+    def __init__(self, ref_path: str, allowed_groups: list, actual_group: str, location: str, available_refs: list = None):
+        # Format allowed groups for display
+        if len(allowed_groups) == 1:
+            expected = f"'{allowed_groups[0]}.*'"
+        else:
+            expected = ' or '.join(f"'{g}.*'" for g in allowed_groups)
+
+        # Build helpful details
+        details = {
+            "Reference": ref_path,
+            "Location": location,
+            "Expected": expected,
+            "Got": f"'{actual_group}.*'"
+        }
+
+        # Add available refs if provided
+        if available_refs is not None:
+            group_name = allowed_groups[0] if len(allowed_groups) == 1 else 'allowed'
+            details[f"Available {group_name} refs"] = ', '.join(available_refs) if available_refs else "(none defined)"
+
+        super().__init__(
+            code="REF-004",
+            message=f"Reference type mismatch: cannot use '{ref_path}' in this context",
+            details=details,
+            fix=f"Use a {expected} reference instead, or move this reference to the appropriate block"
+        )
+
+
 def handle_errors(func):
     """Decorator for user-friendly error handling"""
     def wrapper(*args, **kwargs):

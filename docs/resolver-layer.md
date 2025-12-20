@@ -113,6 +113,81 @@ With explicit paths, `${vars.timeout}`, `${schedules.cleanup.timeout}`, and `${s
 
 ---
 
+## Reference Type Validation
+
+### Context-Aware Type Checking
+
+The resolver enforces that references are used in the correct context:
+
+- **`conditions.*` refs** can only be used in `conditions` blocks
+- **`actions.*` refs** can only be used in `actions` blocks
+
+This prevents configuration errors that would fail at execution time.
+
+### Example: Type Mismatch Errors
+
+```yaml
+refs:
+  conditions:
+    private-tracker:
+      any:
+        - field: trackers.0.url
+          operator: contains
+          value: "privatehd.to"
+
+  actions:
+    safe-delete:
+      - type: add_tag
+        params:
+          tags: ["pending-delete"]
+      - type: stop
+
+rules:
+  - name: "Bad rule"
+    conditions:
+      - $ref: actions.safe-delete  # ❌ ERROR: actions ref in conditions
+    actions:
+      - $ref: conditions.private-tracker  # ❌ ERROR: conditions ref in actions
+```
+
+**Error message example:**
+```
+Reference type mismatch: cannot use 'actions.safe-delete' in this context
+  • Reference: actions.safe-delete
+  • Location: rules['Bad rule'].conditions[0]
+  • Expected: 'conditions.*'
+  • Got: 'actions.*'
+  • Available conditions refs: private-tracker
+  • Fix: Use a 'conditions.*' reference instead, or move this reference to the appropriate block
+```
+
+### Why This Matters
+
+1. **Fail Fast**: Errors caught at config load time, not at rule execution
+2. **Clear Errors**: Precise error messages with location and suggested fixes
+3. **Type Safety**: Schema enforcement prevents invalid rule structures
+4. **Better IDE Support**: Future tooling can provide auto-complete and validation
+
+### Exception: Custom Fields
+
+Type validation only applies to `conditions` and `actions` blocks. Custom fields can reference any type:
+
+```yaml
+rules:
+  - name: "With metadata"
+    conditions:
+      - $ref: conditions.private-tracker  # ✓ Validated
+    actions:
+      - $ref: actions.safe-delete         # ✓ Validated
+    custom_metadata:
+      condition_ref: $ref: conditions.private-tracker  # ✓ No validation
+      action_ref: $ref: actions.safe-delete            # ✓ No validation
+```
+
+This allows flexibility for documentation, metadata, or future features.
+
+---
+
 ## Two Resolution Mechanisms
 
 ### 1. Variable Substitution (`${path}`)
@@ -391,19 +466,94 @@ Each group has its own schema. The resolver validates accordingly.
 class RuleResolver:
     def __init__(self, config: dict, instance_id: Optional[str] = None):
         refs = config.get('refs', {})
-        
+
         # Extract typed groups
         self.vars = dict(refs.get('vars', {}))
         self.conditions = refs.get('conditions', {})
         self.actions = refs.get('actions', {})
-        
+
         # Apply instance overrides
         if instance_id:
             instance = config.get('instances', {}).get(instance_id, {})
             instance_refs = instance.get('refs', {})
             instance_vars = instance_refs.get('vars', {})
             self.vars.update(instance_vars)
-    
+
+    def resolve_rule(self, rule: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Fully resolve a rule with context-aware type validation
+        """
+        resolved = copy.deepcopy(rule)
+        rule_name = rule.get('name', 'unknown')
+
+        # Expand refs in conditions (only allow conditions.* refs)
+        if 'conditions' in resolved:
+            resolved['conditions'] = self._expand_refs(
+                resolved['conditions'],
+                allowed_groups=['conditions'],
+                path=f"rules['{rule_name}'].conditions"
+            )
+
+        # Expand refs in actions (only allow actions.* refs)
+        if 'actions' in resolved:
+            resolved['actions'] = self._expand_refs(
+                resolved['actions'],
+                allowed_groups=['actions'],
+                path=f"rules['{rule_name}'].actions"
+            )
+
+        # Expand refs in other fields (no validation)
+        for key in resolved:
+            if key not in ('conditions', 'actions', 'name'):
+                resolved[key] = self._expand_refs(
+                    resolved[key],
+                    allowed_groups=None,  # No restrictions
+                    path=f"rules['{rule_name}'].{key}"
+                )
+
+        # Substitute variables (type-aware)
+        resolved = self._substitute_vars(resolved)
+
+        return resolved
+
+    def _expand_refs(
+        self,
+        node: Any,
+        allowed_groups: Optional[List[str]] = None,
+        path: str = ""
+    ) -> Any:
+        """
+        Recursively expand $ref references with type validation
+
+        Args:
+            allowed_groups: List of allowed ref groups (['conditions'], ['actions'])
+                           None = no restrictions (for custom fields)
+            path: Current location for error messages
+        """
+        if isinstance(node, dict) and '$ref' in node:
+            ref_path = node['$ref']
+            ref_group = ref_path.split('.', 1)[0]
+
+            # Validate ref group is known
+            if ref_group not in ['conditions', 'actions']:
+                raise InvalidRefError(ref_path, f"Unknown group '{ref_group}'")
+
+            # Validate ref group matches context
+            if allowed_groups and ref_group not in allowed_groups:
+                raise RefTypeMismatchError(
+                    ref_path=ref_path,
+                    allowed_groups=allowed_groups,
+                    actual_group=ref_group,
+                    location=path
+                )
+
+            # Look up and recursively expand
+            expanded = self._lookup_ref(ref_path)
+            return self._expand_refs(expanded, allowed_groups, path)
+
+        # Handle lists and dicts recursively...
+        return node
+
     def _lookup_ref(self, path: str) -> Any:
         """
         Resolve dot-notation path: 'conditions.private-tracker'
@@ -411,21 +561,21 @@ class RuleResolver:
         parts = path.split('.', 1)
         if len(parts) != 2:
             raise InvalidRefError(f"Invalid ref path: '{path}'. Expected 'group.name'")
-        
+
         group, name = parts
-        
+
         if group == 'conditions':
             if name not in self.conditions:
                 raise UnknownRefError(path, list(self.conditions.keys()))
             return self.conditions[name]
-        
+
         if group == 'actions':
             if name not in self.actions:
                 raise UnknownRefError(path, list(self.actions.keys()))
             return self.actions[name]
-        
+
         raise InvalidRefError(f"Unknown ref group: '{group}'")
-    
+
     def _resolve_var_path(self, path: str) -> Any:
         """
         Resolve dot-notation variable path: 'vars.min_ratio'
@@ -433,11 +583,11 @@ class RuleResolver:
         parts = path.split('.', 1)
         if len(parts) != 2 or parts[0] != 'vars':
             raise InvalidVariableError(f"Invalid variable path: '{path}'. Expected 'vars.name'")
-        
+
         name = parts[1]
         if name not in self.vars:
             raise UnknownVariableError(name, list(self.vars.keys()))
-        
+
         return self.vars[name]
 ```
 
