@@ -492,7 +492,8 @@ class Config:
         refs = raw_rules.get('refs', {})
         instances = raw_rules.get('instances', {})
 
-        # Create resolver (no instance_id for now - stub for future)
+        # Create resolver with global refs
+        # TODO: Support per-instance resolvers when running against specific instances
         self._resolver = RuleResolver(refs=refs, instance_id=None, instances=instances)
 
         # Invalidate resolved rules cache

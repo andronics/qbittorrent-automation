@@ -65,17 +65,17 @@ class RuleResolver:
 
         Args:
             refs: The refs block from config (vars, conditions, actions)
-            instance_id: Optional instance ID for scoped variable overrides (stub for future)
-            instances: Optional instances dict for instance-scoped overrides (stub for future)
+            instance_id: Optional instance ID for scoped variable overrides
+            instances: Optional instances dict containing instance-scoped refs
         """
         # Extract typed groups from refs
         self.vars = dict(refs.get('vars', {}))
         self.conditions = refs.get('conditions', {})
         self.actions = refs.get('actions', {})
 
-        # Future: Apply instance-scoped overrides
-        # Currently stubbed - instance_id and instances accepted but not used
-        # This keeps the API ready for multi-instance support in future versions
+        # Apply instance-scoped variable overrides
+        # Fully implemented - awaiting Config class integration to pass instance_id
+        # Currently Config always passes instance_id=None (see config.py:496)
         if instance_id and instances:
             instance = instances.get(instance_id, {})
             instance_refs = instance.get('refs', {})
