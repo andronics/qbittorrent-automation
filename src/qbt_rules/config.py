@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Union
 
 from qbt_rules.errors import ConfigurationError
+from qbt_rules.resolver import RuleResolver
 
 
 # Environment variable mapping
@@ -433,6 +434,10 @@ class Config:
         # Track rules file modification time for hot-reload
         self._rules_mtime = None
 
+        # Resolver and cache for resolved rules
+        self._resolver: Optional[RuleResolver] = None
+        self._resolved_rules_cache: Optional[list] = None
+
     def _load_config(self):
         """Load config.yml with environment variable expansion"""
         logging.debug(f"Loading config from {self.config_file}")
@@ -443,7 +448,7 @@ class Config:
         logging.debug(f"Configuration loaded successfully")
 
     def _load_rules(self):
-        """Load rules.yml"""
+        """Load rules.yml and initialize resolver"""
         logging.debug(f"Loading rules from {self.rules_file}")
 
         raw_rules = load_yaml_file(self.rules_file)
@@ -482,6 +487,22 @@ class Config:
                 )
 
         logging.debug(f"Loaded {len(self.rules)} rules")
+
+        # Extract refs block and initialize resolver
+        refs = raw_rules.get('refs', {})
+        instances = raw_rules.get('instances', {})
+
+        # Create resolver with global refs
+        # TODO: Support per-instance resolvers when running against specific instances
+        self._resolver = RuleResolver(refs=refs, instance_id=None, instances=instances)
+
+        # Invalidate resolved rules cache
+        self._resolved_rules_cache = None
+
+        if refs:
+            logging.debug(f"Initialized resolver with refs: vars={len(refs.get('vars', {}))}, "
+                         f"conditions={len(refs.get('conditions', {}))}, "
+                         f"actions={len(refs.get('actions', {}))}")
 
     def get(self, key: str, default: Any = None) -> Any:
         """
@@ -569,12 +590,16 @@ class Config:
 
         return bool(config_value)
 
-    def get_rules(self) -> list:
+    def get_rules(self, resolved: bool = True) -> list:
         """
         Get list of rules with hot-reload support
 
         Re-reads rules.yml if the file has been modified since last load.
         This allows rules to be updated without restarting the server.
+
+        Args:
+            resolved: If True, return rules with refs/vars resolved (default: True)
+                     If False, return raw rules without resolution
 
         Returns:
             List of rule dictionaries
@@ -582,6 +607,13 @@ class Config:
         Note:
             If reload fails (syntax error, file deleted, etc.), the previously
             loaded rules are retained and a warning is logged.
+
+        Examples:
+            >>> config.get_rules()  # Resolved rules (default)
+            [{'name': 'cleanup', 'conditions': [...], 'actions': [...]}]
+
+            >>> config.get_rules(resolved=False)  # Raw rules
+            [{'name': 'cleanup', 'conditions': [{'$ref': 'conditions.well-seeded'}], ...}]
         """
         try:
             # Check if rules file has been modified
@@ -596,7 +628,35 @@ class Config:
             # Keep existing rules on error - graceful degradation
             logging.warning(f"Failed to reload rules from {self.rules_file}: {e}. Using cached rules.")
 
-        return self.rules
+        # Return raw rules if requested
+        if not resolved:
+            return self.rules
+
+        # Return cached resolved rules if available
+        if self._resolved_rules_cache is not None:
+            return self._resolved_rules_cache
+
+        # Resolve rules and cache the result
+        if self._resolver is None:
+            # No refs block - return raw rules
+            self._resolved_rules_cache = self.rules
+        else:
+            # Resolve each rule
+            resolved_rules = []
+            for rule in self.rules:
+                try:
+                    resolved_rule = self._resolver.resolve_rule(rule)
+                    resolved_rules.append(resolved_rule)
+                except Exception as e:
+                    # Log error with rule name for debugging
+                    rule_name = rule.get('name', 'unknown')
+                    logging.error(f"Failed to resolve rule '{rule_name}': {e}")
+                    raise  # Re-raise to surface the error
+
+            self._resolved_rules_cache = resolved_rules
+            logging.debug(f"Resolved and cached {len(resolved_rules)} rules")
+
+        return self._resolved_rules_cache
 
 
 def load_config(config_dir: Optional[Path] = None) -> Config:

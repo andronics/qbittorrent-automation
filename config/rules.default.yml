@@ -5,6 +5,98 @@
 #
 # For settings, see config.yml
 
+# Optional: Reusable references (v0.5.0+)
+# Define reusable variables, conditions, and actions to reduce repetition.
+# Use ${vars.name} for variable substitution and $ref: path for structure expansion.
+#
+# Uncomment and customize the refs block below to use the resolver layer:
+
+# refs:
+#   vars:
+#     # Scalar values - thresholds, patterns, lists
+#     min_ratio: 1.0
+#     high_ratio: 2.5
+#     cleanup_age: "30 days"
+#     private_ratio_threshold: 1.0
+#     hd_pattern: '(?i).*(1080p|2160p|4k).*'
+#     protected_categories: ["keep", "seedbox", "archive"]
+#
+#   conditions:
+#     # Reusable condition groups
+#     private-tracker:
+#       any:
+#         - field: trackers.url
+#           operator: contains
+#           value: ".private"
+#         - field: trackers.url
+#           operator: contains
+#           value: "privatehd.to"
+#
+#     well-seeded:
+#       all:
+#         - field: info.ratio
+#           operator: ">="
+#           value: ${vars.min_ratio}
+#         - field: info.completion_on
+#           operator: older_than
+#           value: ${vars.cleanup_age}
+#
+#     hd-content:
+#       all:
+#         - field: info.name
+#           operator: matches
+#           value: ${vars.hd_pattern}
+#
+#     protected:
+#       any:
+#         - field: info.category
+#           operator: in
+#           value: ${vars.protected_categories}
+#         - field: info.tags
+#           operator: contains
+#           value: "keep"
+#
+#   actions:
+#     # Reusable action sequences
+#     safe-delete:
+#       - type: add_tag
+#         params:
+#           tags: ["pending-delete"]
+#       - type: stop
+#
+#     force-seed:
+#       - type: force_start
+#       - type: add_tag
+#         params:
+#           tags: ["force-seeding"]
+#
+#     tag-hd:
+#       - type: add_tag
+#         params:
+#           tags: ["hd", "auto-tagged"]
+
+# Example rules using refs (uncomment to enable):
+# - name: "Cleanup well-seeded private tracker torrents"
+#   enabled: true
+#   conditions:
+#     - $ref: conditions.private-tracker
+#     - $ref: conditions.well-seeded
+#     - none:
+#         - $ref: conditions.protected
+#   actions:
+#     - $ref: actions.safe-delete
+#
+# - name: "Force seed private tracker under ratio"
+#   enabled: true
+#   conditions:
+#     - $ref: conditions.private-tracker
+#     - all:
+#         - field: info.ratio
+#           operator: "<"
+#           value: ${vars.private_ratio_threshold}
+#   actions:
+#     - $ref: actions.force-seed
+
 rules:
   - name: Block unwanted archive files on add
     enabled: true

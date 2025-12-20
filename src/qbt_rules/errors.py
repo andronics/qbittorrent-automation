@@ -168,6 +168,113 @@ class OperatorError(QBittorrentError):
         )
 
 
+class ResolverError(QBittorrentError):
+    """Base class for resolver errors"""
+    pass
+
+
+class InvalidRefError(ResolverError):
+    """Invalid $ref path or format"""
+
+    def __init__(self, ref_path: str, reason: str):
+        super().__init__(
+            code="REF-001",
+            message=f"Invalid reference path: {ref_path}",
+            details={"Problem": reason},
+            fix="Use format 'group.name' (e.g., 'conditions.private-tracker', 'actions.safe-delete')"
+        )
+
+
+class UnknownRefError(ResolverError):
+    """Reference not found in refs block"""
+
+    def __init__(self, ref_path: str, available_refs: list):
+        group = ref_path.split('.')[0] if '.' in ref_path else 'unknown'
+        super().__init__(
+            code="REF-002",
+            message=f"Unknown reference: {ref_path}",
+            details={
+                "Reference": ref_path,
+                "Available in '{group}'": ', '.join(available_refs) if available_refs else "(none defined)"
+            },
+            fix=f"Define '{ref_path}' in the refs.{group} section of your config"
+        )
+
+
+class InvalidVariableError(ResolverError):
+    """Invalid variable path or format"""
+
+    def __init__(self, var_path: str, reason: str):
+        super().__init__(
+            code="VAR-001",
+            message=f"Invalid variable path: {var_path}",
+            details={"Problem": reason},
+            fix="Use format 'vars.name' (e.g., '${vars.min_ratio}')"
+        )
+
+
+class UnknownVariableError(ResolverError):
+    """Variable not found in refs.vars"""
+
+    def __init__(self, var_name: str, available_vars: list):
+        super().__init__(
+            code="VAR-002",
+            message=f"Unknown variable: {var_name}",
+            details={
+                "Variable": var_name,
+                "Available variables": ', '.join(available_vars) if available_vars else "(none defined)"
+            },
+            fix=f"Define '{var_name}' in the refs.vars section of your config"
+        )
+
+
+class CircularRefError(ResolverError):
+    """Circular reference detected"""
+
+    def __init__(self, ref_path: str, ref_stack: list):
+        chain = ' -> '.join(ref_stack + [ref_path])
+        super().__init__(
+            code="REF-003",
+            message=f"Circular reference detected",
+            details={
+                "Reference chain": chain,
+                "Problem": f"'{ref_path}' references itself directly or indirectly"
+            },
+            fix="Remove the circular dependency by restructuring your refs"
+        )
+
+
+class RefTypeMismatchError(ResolverError):
+    """Reference type does not match context"""
+
+    def __init__(self, ref_path: str, allowed_groups: list, actual_group: str, location: str, available_refs: list = None):
+        # Format allowed groups for display
+        if len(allowed_groups) == 1:
+            expected = f"'{allowed_groups[0]}.*'"
+        else:
+            expected = ' or '.join(f"'{g}.*'" for g in allowed_groups)
+
+        # Build helpful details
+        details = {
+            "Reference": ref_path,
+            "Location": location,
+            "Expected": expected,
+            "Got": f"'{actual_group}.*'"
+        }
+
+        # Add available refs if provided
+        if available_refs is not None:
+            group_name = allowed_groups[0] if len(allowed_groups) == 1 else 'allowed'
+            details[f"Available {group_name} refs"] = ', '.join(available_refs) if available_refs else "(none defined)"
+
+        super().__init__(
+            code="REF-004",
+            message=f"Reference type mismatch: cannot use '{ref_path}' in this context",
+            details=details,
+            fix=f"Use a {expected} reference instead, or move this reference to the appropriate block"
+        )
+
+
 def handle_errors(func):
     """Decorator for user-friendly error handling"""
     def wrapper(*args, **kwargs):
