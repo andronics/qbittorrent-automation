@@ -24,6 +24,7 @@ qbt-rules is a **client-server automation engine** for qBittorrent that processe
 **Key Features:**
 
 - **Declarative YAML Rules** - No coding required
+- **Reusable References (v0.5.0+)** - Define variables, conditions, and actions once; use everywhere
 - **Multiple Execution Contexts** - Manual, weekly-cleanup (cron), webhooks (torrent-imported, download-finished)
 - **Powerful Conditions** - Complex logic with AND/OR/NOT groups, 17+ operators
 - **Rich Field Access** - Dot notation access to all torrent metadata (info.*, trackers.*, files.*, etc.)
@@ -620,6 +621,113 @@ secrets:
 ```
 
 📖 **[More Examples](config/rules.default.yml)**
+
+---
+
+## Reusable References (v0.5.0+)
+
+The **resolver layer** allows you to define reusable variables, conditions, and actions to reduce repetition and make rules more maintainable.
+
+### Benefits
+
+- **DRY Principle**: Define once, reference many times
+- **Type-Aware Variables**: Preserve types (floats, lists, etc.)
+- **Composable Logic**: Mix references with inline conditions
+- **Future-Ready**: Designed for upcoming features (schedules, notifications, multi-instance)
+
+### Quick Example
+
+```yaml
+refs:
+  vars:
+    min_ratio: 1.5
+    cleanup_age: "30 days"
+    protected_categories: ["keep", "archive"]
+
+  conditions:
+    well-seeded:
+      all:
+        - field: info.ratio
+          operator: ">="
+          value: ${vars.min_ratio}
+        - field: info.completion_on
+          operator: older_than
+          value: ${vars.cleanup_age}
+
+    protected:
+      any:
+        - field: info.category
+          operator: in
+          value: ${vars.protected_categories}
+
+  actions:
+    safe-delete:
+      - type: add_tag
+        params:
+          tags: ["pending-delete"]
+      - type: stop
+
+rules:
+  - name: "Cleanup well-seeded torrents"
+    enabled: true
+    conditions:
+      - $ref: conditions.well-seeded
+      - none:
+          - $ref: conditions.protected
+    actions:
+      - $ref: actions.safe-delete
+```
+
+### How It Works
+
+**Two Resolution Mechanisms:**
+
+1. **Variable Substitution** (`${vars.name}`): Replace placeholders with values
+   - `${vars.min_ratio}` → `1.5` (preserves float type)
+   - `${vars.protected_categories}` → `["keep", "archive"]` (preserves list)
+   - `"Ratio: ${vars.min_ratio}"` → `"Ratio: 1.5"` (string interpolation)
+
+2. **Reference Expansion** (`$ref: path`): Replace with entire structure
+   - `$ref: conditions.well-seeded` → Expands to full condition block
+   - `$ref: actions.safe-delete` → Expands to action sequence
+
+**Resolution Order:**
+1. Expand all `$ref` references (recursive)
+2. Substitute all `${vars.*}` variables (type-aware)
+3. Cache resolved rules for performance
+
+### Structure
+
+All reusable components live under the `refs` key:
+
+```yaml
+refs:
+  vars:           # Scalar values, lists, simple config
+    key: value
+
+  conditions:     # Condition groups: {all|any|none: [...]}
+    name:
+      all: [...]
+
+  actions:        # Action sequences: [{type, params}, ...]
+    name:
+      - type: action_type
+        params: {...}
+```
+
+### Path Notation
+
+All references use explicit dot notation:
+
+- Variables: `${vars.variable_name}`
+- Conditions: `$ref: conditions.condition_name`
+- Actions: `$ref: actions.action_name`
+
+### Backward Compatibility
+
+Rules without `refs` block work unchanged. The resolver is opt-in.
+
+📖 **[Complete Resolver Documentation](docs/resolver-layer.md)**
 
 ---
 
